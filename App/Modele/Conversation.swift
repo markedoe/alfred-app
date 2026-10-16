@@ -1,0 +1,393 @@
+import AlfredKit
+import Foundation
+import Observation
+
+/// La conversation avec Alfred : la parole (micro, détection, tours), l'écrit, les réponses et la voix.
+///
+/// Mêmes règles que la console :
+/// - **conversation continue** : un toucher ouvre le micro ; chaque phrase est un tour ; après la réponse, Alfred
+///   réécoute ; la conversation se ferme d'un toucher, ou après 90 s sans parole ;
+/// - **demi-duplex** : pendant la réflexion et la voix d'Alfred, le micro n'envoie rien ; 1 s de marge après sa voix
+///   (la fin de sa phrase ne doit pas ouvrir un tour) ;
+/// - **rien de compris** : on réécoute, sans drame ;
+/// - **échec** (délai, refus, coupure) : affiché, jamais renvoyé ; la conversation se ferme.
+@Observable @MainActor
+final class Conversation {
+    enum Phase: Hashable, Sendable {
+        case repos
+        case ecoute
+        case reflexion
+        case reponse
+    }
+
+    struct Outil: Identifiable, Equatable, Sendable {
+        enum Etat: Equatable, Sendable { case enCours, fait, echec }
+        let id: String
+        let libelle: String
+        var etat: Etat
+    }
+
+    struct Message: Identifiable, Equatable, Sendable {
+        enum Auteur: Equatable, Sendable { case moi, alfred }
+        let id: UUID
+        let auteur: Auteur
+        var texte: String
+        var outils: [Outil] = []
+        var enCours = false
+        var erreur = false
+        var comprisLocalement = false
+        let date: Date
+    }
+
+    /// Un avis passager (en haut de l'écran, avec un retour haptique).
+    struct Avis: Identifiable, Equatable, Sendable {
+        enum Genre: Equatable, Sendable { case info, attention }
+        let id = UUID()
+        let texte: String
+        let genre: Genre
+    }
+
+    static let silenceMaximal: Duration = .seconds(90)
+    static let margeApresReponse = 16_000  // échantillons : 1 s à 16 kHz
+    static let cleLireEcrit = "voix.lireReponsesEcrites"
+
+    private(set) var phase: Phase = .repos
+    private(set) var messages: [Message] = []
+    /// Le micro est ouvert (conversation continue).
+    private(set) var enConversation = false
+    private(set) var avis: Avis?
+    /// Nombre de tours de voix réussis (retour haptique « succès »).
+    private(set) var reponses = 0
+    /// Lire à voix haute les réponses aux questions écrites (comme Siri : non par défaut).
+    var lireReponsesEcrites: Bool {
+        didSet { reglages.set(lireReponsesEcrites, forKey: Self.cleLireEcrit) }
+    }
+
+    /// Niveau du micro (0…1), lu à chaque image par le noyau (hors observation : pas 50 invalidations par seconde).
+    @ObservationIgnored private(set) var niveauMicro: Float = 0
+    @ObservationIgnored private(set) var voix: any MoteurVoix
+    @ObservationIgnored var client: ClientRelais?
+
+    private let reglages: UserDefaults
+    @ObservationIgnored private var conversationId: String?
+    @ObservationIgnored private var ecoute: Task<Void, Never>?
+    @ObservationIgnored private var minuterieSilence: Task<Void, Never>?
+    @ObservationIgnored private var lecture: Task<Void, Never>?
+    @ObservationIgnored private var detecteur = DetecteurParole(conversation: true)
+    @ObservationIgnored private var amorce = Amorce()
+    @ObservationIgnored private var tourOuvert = false
+    @ObservationIgnored private var margeRestante = 0
+    @ObservationIgnored private var tourVocal = false
+    @ObservationIgnored private var voixEnCours = false
+    @ObservationIgnored private var finRecue = false
+    @ObservationIgnored private var messageAlfred: UUID?
+
+    init(voix: any MoteurVoix, reglages: UserDefaults = .standard) {
+        self.voix = voix
+        self.reglages = reglages
+        lireReponsesEcrites = reglages.bool(forKey: Self.cleLireEcrit)
+        brancher(voix)
+    }
+
+    private func brancher(_ v: any MoteurVoix) {
+        v.surInterruption = { [weak self] in
+            Task { await self?.terminer() }
+        }
+    }
+
+    var niveauVoix: Float { voix.niveauVoix }
+
+    /// Le son de l'appareil, une fois la maison jointe (la démo et les tests gardent la voix muette).
+    func remplacerVoix(_ v: any MoteurVoix) {
+        voix.interrompre()
+        voix.surInterruption = nil
+        voix = v
+        brancher(v)
+    }
+    var vide: Bool { messages.isEmpty }
+
+    // MARK: - parole
+
+    /// Le toucher du noyau : ouvre la conversation, ou la ferme.
+    func basculerEcoute() async {
+        if enConversation {
+            await terminer()
+            return
+        }
+        guard client != nil else {
+            aviser("La maison n’est pas jointe pour l’instant.", .attention)
+            return
+        }
+        guard await voix.autoriserMicro() else {
+            aviser("Alfred n’a pas accès au micro. Autorisez-le dans Réglages › Alfred.", .attention)
+            return
+        }
+        let flux: AsyncStream<[Float]>
+        do {
+            flux = try voix.ouvrirMicro()
+        } catch {
+            aviser("Le micro n’a pas pu s’ouvrir.", .attention)
+            return
+        }
+        enConversation = true
+        detecteur = DetecteurParole(conversation: true)
+        ecouterTour(marge: 0)
+        ecoute = Task { [weak self] in
+            for await echantillons in flux {
+                guard let self else { return }
+                await self.entendre(echantillons)
+            }
+        }
+    }
+
+    private func ecouterTour(marge: Int) {
+        phase = .ecoute
+        let plancher = detecteur.plancher
+        detecteur = DetecteurParole(conversation: true, plancher: plancher)
+        amorce = Amorce()
+        tourOuvert = false
+        tourVocal = true
+        margeRestante = marge
+        armerSilence()
+    }
+
+    private func armerSilence() {
+        minuterieSilence?.cancel()
+        minuterieSilence = Task { [weak self] in
+            try? await Task.sleep(for: Self.silenceMaximal)
+            guard !Task.isCancelled, let self, self.enConversation, self.phase == .ecoute, !self.tourOuvert else {
+                return
+            }
+            await self.terminer()
+        }
+    }
+
+    /// Un paquet du micro (dans l'ordre, une seule tâche).
+    func entendre(_ echantillons: [Float]) async {
+        guard enConversation, phase == .ecoute, let client else {
+            niveauMicro = 0
+            return
+        }
+        niveauMicro = Self.niveau(echantillons)
+        if margeRestante > 0 {
+            detecteur.mesurer(echantillons)
+            margeRestante -= echantillons.count
+            return
+        }
+        let decisions = detecteur.analyser(echantillons)
+        let pcm = PCM.enOctets(echantillons)
+        if tourOuvert { await client.audio(pcm) } else { amorce.ajouter(pcm) }
+        for decision in decisions {
+            switch decision {
+            case .attaque:
+                minuterieSilence?.cancel()
+                guard await client.parler(conversation: conversationId, amorce: amorce.prendre()) else {
+                    aviser("La maison n’est pas jointe pour l’instant.", .attention)
+                    await terminer()
+                    return
+                }
+                tourOuvert = true
+                finRecue = false
+            case .fin:
+                guard tourOuvert else { continue }
+                await client.finParole()
+                tourOuvert = false
+                phase = .reflexion
+                niveauMicro = 0
+            case .bruitIgnore:
+                continue
+            }
+        }
+    }
+
+    /// Ferme la conversation (toucher, silence, interruption par iOS, app en arrière-plan).
+    func terminer() async {
+        guard enConversation else { return }
+        minuterieSilence?.cancel()
+        ecoute?.cancel()
+        ecoute = nil
+        // une phrase en cours d'envoi part quand même : le flux se ferme proprement
+        if tourOuvert, let client {
+            await client.finParole()
+            tourOuvert = false
+            phase = .reflexion
+        }
+        enConversation = false
+        niveauMicro = 0
+        lecture?.cancel()
+        voix.fermerMicro()
+        if phase == .ecoute || phase == .reponse { phase = .repos }
+    }
+
+    // MARK: - écrit
+
+    /// Une question écrite. Ferme d'abord la conversation à la voix, s'il y en a une.
+    func ecrire(_ texte: String) async {
+        let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, phase == .repos || phase == .ecoute else { return }
+        if enConversation { await terminer() }
+        guard let client else {
+            aviser("La maison n’est pas jointe pour l’instant.", .attention)
+            return
+        }
+        let message = Message(id: UUID(), auteur: .moi, texte: t, date: .now)
+        guard await client.ecrire(t, conversation: conversationId) else {
+            messages.append(message)
+            aviser("La maison n’est pas jointe pour l’instant.", .attention)
+            return
+        }
+        messages.append(message)
+        tourVocal = false
+        finRecue = false
+        phase = .reflexion
+        commencerReponse()
+    }
+
+    /// Nouvelle conversation : Alfred oublie le fil (la session de parole de HA).
+    func nouvelle() async {
+        await terminer()
+        lecture?.cancel()
+        voix.interrompre()
+        messages = []
+        conversationId = nil
+        messageAlfred = nil
+        phase = .repos
+    }
+
+    // MARK: - ce que dit la maison
+
+    func recevoir(_ signal: AutomateTour.Signal) {
+        switch signal {
+        case .transcrit(let texte):
+            messages.append(Message(id: UUID(), auteur: .moi, texte: texte, date: .now))
+            if DemandeLente.estLente(texte) { voix.accueillir() }
+        case .reflechit:
+            phase = .reflexion
+            commencerReponse()
+        case .outilCommence(let appel):
+            modifierReponse { $0.outils.append(Outil(id: appel.id, libelle: Self.libelle(appel), etat: .enCours)) }
+        case .outilTermine(let id, let succes):
+            modifierReponse { m in
+                if let i = m.outils.firstIndex(where: { $0.id == id }) { m.outils[i].etat = succes ? .fait : .echec }
+            }
+        case .fragment(let morceau):
+            modifierReponse { $0.texte += morceau }
+        case .reponse(let fin):
+            modifierReponse {
+                if !fin.texte.isEmpty { $0.texte = fin.texte }
+                $0.enCours = false
+                $0.comprisLocalement = fin.traiteeLocalement
+            }
+            reponses += 1
+        case .voix(let chemin):
+            guard tourVocal || lireReponsesEcrites else { return }
+            voixEnCours = true
+            phase = .reponse
+            lecture = Task { [weak self] in
+                guard let self else { return }
+                await self.voix.lire(chemin)
+                self.voixFinie()
+            }
+        case .rienSaisi:
+            retirerReponseVide()
+            if enConversation {
+                aviser("Je n’ai rien saisi.", .info)
+                ecouterTour(marge: 0)
+            } else {
+                phase = .repos
+            }
+        case .echec(let message):
+            voix.interrompre()
+            if messageAlfred == nil { commencerReponse() }
+            modifierReponse {
+                $0.texte = message
+                $0.enCours = false
+                $0.erreur = true
+            }
+            messageAlfred = nil
+            phase = .repos
+            Task { await self.terminer() }
+        case .termine(let conversation, _):
+            if let conversation { conversationId = conversation }
+            finRecue = true
+            modifierReponse { $0.enCours = false }
+            if !voixEnCours { tourFini() }
+        }
+    }
+
+    private func voixFinie() {
+        voixEnCours = false
+        if finRecue { tourFini() }
+    }
+
+    private func tourFini() {
+        messageAlfred = nil
+        finRecue = false
+        if enConversation {
+            ecouterTour(marge: Self.margeApresReponse)
+        } else {
+            phase = .repos
+        }
+    }
+
+    private func commencerReponse() {
+        let m = Message(id: UUID(), auteur: .alfred, texte: "", enCours: true, date: .now)
+        messages.append(m)
+        messageAlfred = m.id
+    }
+
+    private func modifierReponse(_ changer: (inout Message) -> Void) {
+        guard let id = messageAlfred, let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        changer(&messages[i])
+    }
+
+    private func retirerReponseVide() {
+        if let id = messageAlfred, let i = messages.firstIndex(where: { $0.id == id }), messages[i].texte.isEmpty {
+            messages.remove(at: i)
+        }
+        messageAlfred = nil
+    }
+
+    func aviser(_ texte: String, _ genre: Avis.Genre) {
+        avis = Avis(texte: texte, genre: genre)
+    }
+
+    func oublierAvis(_ a: Avis) {
+        if avis == a { avis = nil }
+    }
+
+    // MARK: - outils
+
+    static func niveau(_ echantillons: [Float]) -> Float {
+        guard !echantillons.isEmpty else { return 0 }
+        var somme: Float = 0
+        for s in echantillons { somme += s * s }
+        return min(1, (somme / Float(echantillons.count)).squareRoot() * 6)
+    }
+
+    /// Ce qu'Alfred fait, en mots simples (jamais le contenu d'un résultat : l'agenda, par exemple, est privé).
+    static func libelle(_ appel: AppelOutil) -> String {
+        let verbe: String =
+            switch appel.nomCourt {
+            case "HassTurnOn": "Allumer"
+            case "HassTurnOff": "Éteindre"
+            case "HassLightSet": "Régler la lumière"
+            case "HassSetPosition": "Régler l’ouverture"
+            case "HassMediaPause": "Mettre en pause"
+            case "HassMediaUnpause": "Reprendre la lecture"
+            case "HassMediaNext": "Morceau suivant"
+            case "HassSetVolume": "Régler le volume"
+            case "HassGetState", "GetLiveContext": "Lire l’état de la maison"
+            case "HassGetWeather": "Lire la météo"
+            case "HassStartTimer": "Lancer une minuterie"
+            case "HassCancelTimer", "HassCancelAllTimers": "Arrêter la minuterie"
+            case "todo_get_items": "Lire une liste"
+            case "calendar_get_events": "Lire l’agenda"
+            default:
+                appel.nomCourt.replacingOccurrences(of: "script__", with: "")
+                    .replacingOccurrences(of: "_", with: " ").capitalized(with: Locale(identifier: "fr_CH"))
+            }
+        let cible = ["name", "area", "floor"].lazy.compactMap { appel.arguments[$0]?.texte }.first
+        return cible.map { "\(verbe) · \($0)" } ?? verbe
+    }
+}

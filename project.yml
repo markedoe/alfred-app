@@ -1,0 +1,141 @@
+# Projet Xcode de l'app Alfred, généré par XcodeGen (`xcodegen generate`) : ce fichier fait foi, le .xcodeproj n'est
+# jamais versionné ni modifié à la main.
+name: Alfred
+
+options:
+  bundleIdPrefix: io.github.markedoe
+  deploymentTarget:
+    iOS: "26.0"
+  developmentLanguage: fr
+  createIntermediateGroups: true
+  groupSortPosition: top
+  xcodeVersion: "26.6"
+  generateEmptyDirectories: false
+
+configFiles:
+  Debug: Configuration/Base.xcconfig
+  Release: Configuration/Base.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: $(ALFRED_EQUIPE)
+    MARKETING_VERSION: $(ALFRED_VERSION)
+    CURRENT_PROJECT_VERSION: $(ALFRED_BUILD)
+  configs:
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: -O
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      VALIDATE_PRODUCT: YES
+
+packages:
+  AlfredKit:
+    path: Paquets/AlfredKit
+
+targets:
+  Alfred:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: AlfredKit
+        product: AlfredKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Alfred
+        CFBundleDevelopmentRegion: fr
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: Fond
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiredDeviceCapabilities:
+          - arm64
+          - microphone
+        NSMicrophoneUsageDescription: >-
+          Alfred n’écoute que lorsque vous lui parlez, le temps de comprendre votre demande.
+        NSLocalNetworkUsageDescription: >-
+          Alfred se connecte à votre maison par le réseau local, sans passer par internet.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+    entitlements:
+      path: App/Alfred.entitlements
+      properties:
+        com.apple.developer.default-data-protection: NSFileProtectionComplete
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.markedoe.alfred
+        PRODUCT_NAME: Alfred
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Champagne
+        ENABLE_PREVIEWS: YES
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleDefault
+
+  AlfredTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AppTests
+    dependencies:
+      - target: Alfred
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.markedoe.alfred.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  AlfredUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AppUITests
+    dependencies:
+      - target: Alfred
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.markedoe.alfred.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Alfred
+
+schemes:
+  Alfred:
+    build:
+      targets:
+        Alfred: all
+        AlfredTests: [test]
+        AlfredUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      coverageTargets:
+        - Alfred
+      targets:
+        - name: AlfredTests
+          parallelizable: true
+          randomExecutionOrder: true
+        - name: AlfredUITests
+    profile:
+      config: Release
+    archive:
+      config: Release

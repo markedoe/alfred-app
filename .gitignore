@@ -1,0 +1,34 @@
+# Compilation
+.build/
+DerivedData/
+build/
+*.xcresult
+*.ipa
+*.dSYM.zip
+*.dSYM/
+
+# Projet généré par XcodeGen (project.yml fait foi)
+*.xcodeproj/
+*.xcworkspace/
+!Paquets/**/*.xcworkspace/
+
+# Configuration propre à la maison : injectée à la fabrication, jamais versionnée
+Configuration/Local.xcconfig
+App/Ressources/Configuration.plist
+
+# Signature et secrets
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.pem
+AuthKey_*.p8
+
+# Systèmes
+.DS_Store
+.swiftpm/
+xcuserdata/
+
+# Générés par XcodeGen depuis project.yml
+App/Info.plist
+App/Alfred.entitlements

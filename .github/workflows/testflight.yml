@@ -1,0 +1,94 @@
+# Fabrication signée et envoi à TestFlight (testeurs internes : la famille). Lancement à la main, ou par une étiquette
+# de version (v1.0.0…). C'est le SEUL workflow qui lit les secrets : la configuration de la maison (adresse du relais,
+# autorité épinglée, hôte de la page de connexion) et la clé d'API App Store Connect. Signature automatique gérée par
+# Apple (certificats « cloud ») : aucun certificat ni profil n'est stocké nulle part.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Fabriquer et envoyer
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: XcodeGen
+        run: |
+          curl -fsSLo xcodegen.zip "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  xcodegen.zip" | shasum -a 256 -c -
+          unzip -q xcodegen.zip -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+      - name: Projet, avec la configuration de la maison
+        env:
+          ALFRED_RELAIS: ${{ secrets.ALFRED_RELAIS }}
+          ALFRED_AUTORITE_PEM_B64: ${{ secrets.ALFRED_AUTORITE_PEM_B64 }}
+          ALFRED_HA_HOTE: ${{ secrets.ALFRED_HA_HOTE }}
+        run: |
+          test -n "$ALFRED_RELAIS" || { echo "::error::secret ALFRED_RELAIS absent"; exit 1; }
+          scripts/generer.sh
+      - name: Clé d'API App Store Connect
+        env:
+          ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "$ASC_CLE_P8_B64" | base64 --decode > "$RUNNER_TEMP/asc/cle.p8"
+      - name: Archive (Release, signature automatique)
+        env:
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+          ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+          APPLE_EQUIPE_ID: ${{ secrets.APPLE_EQUIPE_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive -quiet \
+            -project Alfred.xcodeproj -scheme Alfred -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/Alfred.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/cle.p8" \
+            -authenticationKeyID "$ASC_CLE_ID" \
+            -authenticationKeyIssuerID "$ASC_EMETTEUR_ID" \
+            ALFRED_EQUIPE="$APPLE_EQUIPE_ID" \
+            ALFRED_BUILD="${{ github.run_number }}" 2>&1 | tee "$RUNNER_TEMP/archive.log"
+      - name: Envoi à TestFlight
+        env:
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+          ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+          APPLE_EQUIPE_ID: ${{ secrets.APPLE_EQUIPE_ID }}
+        run: |
+          set -o pipefail
+          plutil -create xml1 "$RUNNER_TEMP/export.plist"
+          plutil -insert method -string app-store-connect "$RUNNER_TEMP/export.plist"
+          plutil -insert destination -string upload "$RUNNER_TEMP/export.plist"
+          plutil -insert teamID -string "$APPLE_EQUIPE_ID" "$RUNNER_TEMP/export.plist"
+          plutil -insert signingStyle -string automatic "$RUNNER_TEMP/export.plist"
+          plutil -insert uploadSymbols -bool true "$RUNNER_TEMP/export.plist"
+          plutil -insert manageAppVersionAndBuildNumber -bool false "$RUNNER_TEMP/export.plist"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Alfred.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/cle.p8" \
+            -authenticationKeyID "$ASC_CLE_ID" \
+            -authenticationKeyIssuerID "$ASC_EMETTEUR_ID" 2>&1 | tee "$RUNNER_TEMP/export.log"
+      - name: Effacer la clé
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

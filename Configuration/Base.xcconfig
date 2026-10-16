@@ -1,0 +1,8 @@
+// Réglages communs. La version et le numéro de fabrication sont fixés par la CI (`ALFRED_BUILD` = numéro de l'exécution).
+// L'équipe de signature n'est jamais versionnée : la CI la passe, et sur un Mac de développement elle vient de
+// Configuration/Local.xcconfig (ignoré par git), par exemple : ALFRED_EQUIPE = ABCDE12345
+ALFRED_VERSION = 1.0.0
+ALFRED_BUILD = 1
+ALFRED_EQUIPE =
+
+#include? "Local.xcconfig"

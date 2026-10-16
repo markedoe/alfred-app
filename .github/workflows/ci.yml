@@ -1,0 +1,98 @@
+# Intégration : à chaque envoi et chaque demande de fusion. Aucun secret ici (les contributions extérieures n'en
+# reçoivent jamais) ; l'app est fabriquée sans la configuration de la maison et testée sur la maison de démonstration.
+name: Intégration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODEGEN_VERSION: 2.46.0
+  XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  secrets:
+    name: Aucun secret (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks (binaire vérifié par son empreinte)
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" gitleaks
+          ./gitleaks git --redact --no-banner --exit-code 1 .
+
+  noyau-linux:
+    name: AlfredKit (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: swift:6.2.4-noble@sha256:eccc7a97f9b9881d9659e2e788081fd7675f86d39793b51200bfb178398b3784
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tests
+        run: swift test --package-path Paquets/AlfredKit --parallel
+
+  ios:
+    name: App iOS (fabrication, tests, accessibilité)
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Outils
+        run: |
+          xcodebuild -version
+          curl -fsSLo xcodegen.zip "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  xcodegen.zip" | shasum -a 256 -c -
+          unzip -q xcodegen.zip -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+      - name: Style (swift-format)
+        run: |
+          xcrun swift-format lint --strict --recursive \
+            App AppTests AppUITests Paquets/AlfredKit/Sources Paquets/AlfredKit/Tests Paquets/AlfredKit/Package.swift
+      - name: AlfredKit (macOS)
+        run: swift test --package-path Paquets/AlfredKit --parallel
+      - name: Projet (XcodeGen)
+        run: scripts/generer.sh
+      - name: Simulateur
+        id: simulateur
+        run: echo "udid=$(scripts/simulateur.sh)" >> "$GITHUB_OUTPUT"
+      - name: Fabrication et tests (unitaires, interface, audit d'accessibilité)
+        run: |
+          set -o pipefail
+          xcodebuild test -quiet \
+            -project Alfred.xcodeproj -scheme Alfred \
+            -destination "id=${{ steps.simulateur.outputs.udid }}" \
+            -resultBundlePath "$RUNNER_TEMP/Resultats.xcresult" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+      - name: Résultats (captures d'écran comprises)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: resultats-ios
+          path: |
+            ${{ runner.temp }}/Resultats.xcresult
+            ${{ runner.temp }}/xcodebuild.log
+          retention-days: 14

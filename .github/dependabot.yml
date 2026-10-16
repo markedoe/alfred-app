@@ -1,0 +1,10 @@
+# Les actions épinglées par empreinte restent à jour (une demande de fusion par mise à jour, relue avant fusion).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
