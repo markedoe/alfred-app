@@ -23,7 +23,8 @@ final class Alfred {
 
     private(set) var etape: Etape
     private(set) var configuration: ConfigurationMaison?
-    private(set) var liaison: ClientRelais.Etat = .deconnecte
+    /// « connexion » au départ : rien n'a encore échoué (« injoignable » s'affichait au lancement).
+    private(set) var liaison: ClientRelais.Etat = .connexion
     /// Ce que l'app garde de la maison : les lumières et les capteurs des pièces.
     private(set) var maison = Maison()
     private(set) var structure = StructureMaison()
@@ -108,6 +109,7 @@ final class Alfred {
     private func demarrer(acces: any AccesRelais, voix: VoixSysteme?) {
         let client = ClientRelais(acces: acces)
         self.client = client
+        liaison = .connexion
         if let voix { conversation.remplacerVoix(voix) }
         conversation.client = client
         abonnement?.cancel()

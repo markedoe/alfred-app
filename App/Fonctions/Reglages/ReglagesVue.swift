@@ -41,8 +41,6 @@ struct ReglagesVue: View {
                                 )
                             }
                     }
-                } header: {
-                    EnTete("Compte")
                 }
                 Section {
                     Toggle("Lire à voix haute les réponses écrites", isOn: $conversation.lireReponsesEcrites)
@@ -72,9 +70,6 @@ struct ReglagesVue: View {
                     EnTete("À propos")
                 }
             }
-            // limite nette sous la barre : le fondu automatique estompait l'en-tête « Compte » (contraste 3,9:1
-            // mesuré), qui ne peut jamais en sortir puisqu'il est en haut
-            .scrollEdgeEffectStyle(.hard, for: .top)
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -9,12 +9,13 @@ final class ParcoursUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    /// `figee` : sans animations (audit et mesures : l'état final, jamais un écran en transition).
-    private func lancer(sombre: Bool = false, tailleTexte: String? = nil, figee: Bool = false) -> XCUIApplication {
+    /// Toujours sans animations (« -sansAnimations ») : l'audit et les mesures lisent l'état final, et XCTest sait
+    /// quand l'app est au repos (le noyau, animé sans fin, l'en empêche sinon).
+    private func lancer(sombre: Bool = false, tailleTexte: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "-AppleLanguages", "(fr)", "-AppleLocale", "fr_CH"]
         if sombre { app.launchArguments.append("-sombre") }
-        if figee { app.launchArguments.append("-sansAnimations") }
+        app.launchArguments.append("-sansAnimations")
         if let tailleTexte { app.launchArguments += ["-UIPreferredContentSizeCategoryName", tailleTexte] }
         app.launch()
         return app
@@ -69,11 +70,11 @@ final class ParcoursUITests: XCTestCase {
     }
 
     func testAccessibiliteClair() throws {
-        try auditer(lancer(figee: true))
+        try auditer(lancer())
     }
 
     func testAccessibiliteSombre() throws {
-        try auditer(lancer(sombre: true, figee: true))
+        try auditer(lancer(sombre: true))
     }
 
     /// La plus grande taille de texte : le texte grandit vraiment (mesuré), et des captures de chaque écran sont
@@ -83,8 +84,8 @@ final class ParcoursUITests: XCTestCase {
     /// poussés hors de la vue quand le texte grandit (l'élément le plus bas de chaque écran était signalé, ses
     /// semblables plus haut non). L'app n'emploie aucune taille de police fixe.
     func testGrandTexte() throws {
-        let normal = hauteurs(lancer(figee: true))
-        let app = lancer(tailleTexte: "UICTContentSizeCategoryAccessibilityXXXL", figee: true)
+        let normal = hauteurs(lancer())
+        let app = lancer(tailleTexte: "UICTContentSizeCategoryAccessibilityXXXL")
         let grand = hauteurs(app, captures: true)
         for (nom, h) in normal {
             let g = try XCTUnwrap(grand[nom], nom)
@@ -127,12 +128,17 @@ final class ParcoursUITests: XCTestCase {
     /// jugé sur son rendu estompé ; ses semblables plus haut dans l'écran sont audités normalement.
     private static let zoneFonduBas: CGFloat = 40
 
+    private static let engagementMicro =
+        "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan."
+
     /// Les trois écrans, chacun audité en entier (sauf la taille du texte : voir `testGrandTexte`) : tous les
     /// problèmes sont listés dans UN échec, avec l'écran, le type de problème, l'élément et sa place. Deux cas sont
     /// écartés, et listés à part (pièce jointe « audit-ecartes ») :
     /// - un élément dans le fondu du bas (ci-dessus) : contraste, texte coupé ;
     /// - le champ de recherche du système (`.searchable`) : la couleur et la taille de son texte indicatif sont
-    ///   celles d'iOS, que l'app ne peut pas changer.
+    ///   celles d'iOS, que l'app ne peut pas changer ;
+    /// - « texte coupé » prédit pour l'engagement du micro, démenti par la capture « grand-texte-6-reglages-fin »
+    ///   (AccessibilityXXXL : le texte passe à la ligne jusqu'au bout, rien n'est coupé).
     private func auditer(_ app: XCUIApplication) throws {
         var problemes: [String] = []
         var ecartes: [String] = []
@@ -154,6 +160,8 @@ final class ParcoursUITests: XCTestCase {
                     ecartes.append("fondu du bas · " + description)
                 } else if probleme.element?.elementType == .searchField, rendu.contains(probleme.auditType) {
                     ecartes.append("champ de recherche du système · " + description)
+                } else if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
+                    ecartes.append("vérifié en très grand texte · " + description)
                 } else {
                     problemes.append(description)
                 }

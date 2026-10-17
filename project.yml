@@ -134,7 +134,9 @@ schemes:
         - name: AlfredTests
           parallelizable: true
           randomExecutionOrder: true
+        # en série : sur des clones du simulateur en parallèle, XCTest perdait l'app (« does not have a process ID »)
         - name: AlfredUITests
+          parallelizable: false
     profile:
       config: Release
     archive:

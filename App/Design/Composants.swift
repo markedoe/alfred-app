@@ -4,10 +4,12 @@ import SwiftUI
 /// L'état du lien avec la maison, en haut de l'écran, seulement quand il n'est pas bon.
 struct EtatLiaison: View {
     @Environment(Alfred.self) private var alfred
+    /// L'état affiché : un état passager (connexion rapide, reconnexion réussie aussitôt) ne s'affiche pas.
+    @State private var affiche: ClientRelais.Etat = .pret
 
     var body: some View {
         Group {
-            switch alfred.liaison {
+            switch affiche {
             case .pret:
                 EmptyView()
             case .connexion, .synchronisation:
@@ -27,7 +29,17 @@ struct EtatLiaison: View {
                 }
             }
         }
-        .animation(.smooth, value: alfred.liaison)
+        .animation(.smooth, value: affiche)
+        .task(id: alfred.liaison) {
+            let etat = alfred.liaison
+            if case .pret = etat {
+                affiche = etat
+                return
+            }
+            // une seconde de grâce : seul ce qui dure mérite d'interrompre
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled { affiche = etat }
+        }
     }
 
     private func capsule(@ViewBuilder _ contenu: () -> some View) -> some View {
