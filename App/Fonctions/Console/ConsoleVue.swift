@@ -512,8 +512,10 @@ private struct Consommation: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("consommation").font(.caption).foregroundStyle(Color(.texteSecondaire))
-                Spacer()
+                Spacer(minLength: 8)
                 Text(sousTitre(h)).font(.caption).foregroundStyle(Color(.texteSecondaire))
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Canvas { c, taille in
                 guard h.count >= 2, let bas = h.min(), var haut = h.max() else { return }
@@ -547,6 +549,8 @@ private struct Consommation: View {
             }
             .frame(height: 40)
         }
+        // un instrument, à la taille de la console, comme les jauges
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Consommation de la maison")
         .accessibilityValue(sousTitre(h))
