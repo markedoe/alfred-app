@@ -1,7 +1,7 @@
 # Fabrication signée et envoi à TestFlight (testeurs internes : la famille). Lancement à la main, ou par une étiquette
-# de version (v1.0.0…). C'est le SEUL workflow qui lit les secrets : la configuration de la maison (adresse du relais,
-# autorité épinglée, hôte de la page de connexion) et la clé d'API App Store Connect. Signature automatique gérée par
-# Apple (certificats « cloud ») : aucun certificat ni profil n'est stocké nulle part.
+# de version (v1.0.0…). Il lit la configuration de la maison (adresse du relais, autorité épinglée, hôte de la page de
+# connexion) et la clé d'API App Store Connect ; le workflow « Certificats » (inventaire en lecture seule) ne lit que
+# cette clé. Signature automatique gérée par Apple (certificats « cloud ») : aucun certificat ni profil n'est stocké.
 name: TestFlight
 
 on:
@@ -47,21 +47,7 @@ jobs:
         env:
           ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
-        # le fichier .p8 tel quel, ou encodé en base64 : les deux sont acceptés ; contrôle sans afficher la clé
-        run: |
-          umask 077
-          mkdir -p "$RUNNER_TEMP/asc"
-          # repère d'une clé PEM, écrit sans son en-tête complet (la garde de confidentialité du dépôt le refuse)
-          repere="PRIVATE KEY-----"
-          if [[ "$ASC_CLE_P8_B64" == *"$repere"* ]]; then
-            printf '%s\n' "$ASC_CLE_P8_B64" > "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
-          else
-            printf '%s' "$ASC_CLE_P8_B64" | python3 -c \
-              'import base64, sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read().strip(), validate=True))' \
-              > "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
-          fi
-          grep -q -- "$repere" "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" \
-            || { echo "::error::ASC_CLE_P8_B64 : pas une clé .p8 ($(wc -c < "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8") octets)"; exit 1; }
+        run: scripts/cle-asc.sh
       - name: Archive (Release, signature automatique)
         env:
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}

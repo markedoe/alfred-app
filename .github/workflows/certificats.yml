@@ -1,0 +1,37 @@
+# Inventaire des certificats de signature de l'équipe Apple, lancement à la main seulement, en lecture seule : type,
+# repère, dates, actif. Lit la clé d'API App Store Connect ; n'affiche aucun nom (celui du titulaire figure dans chaque
+# certificat, et ce journal est public).
+name: Certificats
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certificats
+  cancel-in-progress: false
+
+jobs:
+  inventaire:
+    name: Inventaire (lecture seule)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Clé d'API App Store Connect
+        env:
+          ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+        run: scripts/cle-asc.sh
+      - name: Inventaire
+        env:
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+          ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+        run: ASC_CLE="$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" python3 scripts/outils/certificats.py inventaire
+      - name: Effacer la clé
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

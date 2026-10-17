@@ -70,12 +70,14 @@ swift test --package-path Paquets/AlfredKit
 | `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple en clair et en sombre (captures jointes) |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift et des workflows |
 | `TestFlight` | À la main, ou sur une étiquette `v*` | Archive signée (signature automatique, clé d’API App Store Connect), envoi aux testeurs internes |
+| `Certificats` | À la main | Inventaire des certificats de signature de l’équipe, en lecture seule et sans aucun nom |
 
 **Protections de la chaîne :**
 - les actions sont épinglées par empreinte, et Dependabot les tient à jour ;
 - les permissions sont minimales ;
 - les outils téléchargés sont vérifiés par leur SHA-256 ;
-- seul `TestFlight` lit des secrets, et une contribution extérieure n’en reçoit jamais.
+- seuls `TestFlight` et `Certificats` lisent des secrets, à la main ou sur étiquette ; une contribution extérieure n’en
+  reçoit jamais.
 
 ## Sécurité
 
