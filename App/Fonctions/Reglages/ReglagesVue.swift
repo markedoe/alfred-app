@@ -57,7 +57,7 @@ struct ReglagesVue: View {
                 Section {
                     Engagement("Votre voix ne va que vers votre maison, jamais sur internet.", icone: "house")
                     Engagement(
-                        "Le micro n’est ouvert que pendant une conversation ; il se ferme quand l’app passe en arrière-plan.",
+                        "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan.",
                         icone: "mic.slash")
                     Engagement("La conversation n’est pas gardée sur cet iPhone.", icone: "trash")
                 } header: {

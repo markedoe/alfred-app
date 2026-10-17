@@ -148,7 +148,7 @@ final class ParcoursUITests: XCTestCase {
                 let description =
                     "\(ecran) · \(probleme.compactDescription) · "
                     + (probleme.element.map { "« \($0.label) » \(Int($0.frame.minY))…\(Int($0.frame.maxY)) pt" }
-                        ?? "sans élément")
+                        ?? "sans élément (\(probleme.debugDescription))")
                     + " · \(probleme.detailedDescription)"
                 if let cadre, rendu.contains(probleme.auditType), cadre.maxY > limite {
                     ecartes.append("fondu du bas · " + description)
