@@ -115,7 +115,10 @@ final class ParcoursUITests: XCTestCase {
         bouton(app, "piece-Salon").tap()
         XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
         capturer(app, "ipad-2-piece")
-        try auditerEcrans(app, ["Large"])
+        // à l'horizontale, la capture de l'écran sort tournée (mesuré : « ipad-2-piece », l'interface couchée et une bande
+        // noire) ; l'audit y juge le contraste sur les mauvais points, et signale des textes à 8:1 : il est fait sur
+        // iPhone (mêmes vues, mêmes couleurs), tout le reste est audité ici
+        try auditerEcrans(app, ["Large"], types: XCUIAccessibilityAuditType.all.subtracting([.dynamicType, .contrast]))
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(bouton(app, "onglet-pieces").waitForExistence(timeout: 5), "onglets en disposition étroite")
         capturer(app, "ipad-3-portrait")
@@ -176,10 +179,18 @@ final class ParcoursUITests: XCTestCase {
 
     /// Les vues de la console et les réglages, chacune auditée en entier (sauf la taille du texte : voir
     /// `testGrandTexte`) : tous les problèmes sont listés dans UN échec, avec la vue, le type de problème, l'élément
-    /// et sa place. Un cas est écarté, et listé à part (pièce jointe « audit-ecartes ») : « texte coupé » prédit pour
-    /// l'engagement du micro, démenti par la capture « grand-texte-7-reglages-fin » (le texte passe à la ligne
-    /// jusqu'au bout, rien n'est coupé).
-    private func auditerEcrans(_ app: XCUIApplication, _ ecrans: [String]) throws {
+    /// et sa place. Deux cas sont écartés, et listés à part (pièce jointe « audit-ecartes ») :
+    /// - « texte coupé » prédit pour l'engagement du micro, démenti par la capture « grand-texte-7-reglages-fin » (le
+    ///   texte passe à la ligne jusqu'au bout, rien n'est coupé) ;
+    /// - le contraste d'un texte hors de la vue (sous le bord d'un panneau qui défile, sous la carte d'une pièce).
+    ///
+    /// Le nom et la température des pièces, l'heure et l'état du noyau sont dessinés dans la roue, comme dans la
+    /// console : ce ne sont pas des éléments d'accessibilité (chaque secteur porte sa pièce, son état et sa
+    /// température ; l'état de la conversation est sur « Parler à Alfred » et la ligne d'état).
+    private func auditerEcrans(
+        _ app: XCUIApplication, _ ecrans: [String],
+        types: XCUIAccessibilityAuditType = XCUIAccessibilityAuditType.all.subtracting(.dynamicType)
+    ) throws {
         var problemes: [String] = []
         var ecartes: [String] = []
         for ecran in ecrans {
@@ -191,8 +202,7 @@ final class ParcoursUITests: XCTestCase {
                 XCTAssertTrue(app.navigationBars["Réglages & état"].waitForExistence(timeout: 5))
             default: vue(app, "pieces")
             }
-            try app.performAccessibilityAudit(for: XCUIAccessibilityAuditType.all.subtracting(.dynamicType)) {
-                probleme in
+            try app.performAccessibilityAudit(for: types) { probleme in
                 let description =
                     "\(ecran) · \(probleme.compactDescription) · "
                     + (probleme.element.map { "« \($0.label) » \(Int($0.frame.minY))…\(Int($0.frame.maxY)) pt" }
@@ -200,6 +210,10 @@ final class ParcoursUITests: XCTestCase {
                     + " · \(probleme.detailedDescription)"
                 if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
                     ecartes.append("vérifié en très grand texte · " + description)
+                } else if probleme.auditType == .contrast, let e = probleme.element, !e.isHittable {
+                    // hors de la vue : sous le bord d'un panneau qui défile, ou sous la carte d'une pièce ; un texte
+                    // qu'on ne voit pas ne se juge pas sur ce qui le recouvre (il l'est une fois amené dans la vue)
+                    ecartes.append("hors de la vue · " + description)
                 } else {
                     problemes.append(description)
                 }

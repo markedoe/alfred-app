@@ -12,16 +12,20 @@ struct Roue: View {
     @Binding var choisi: String?
     let rayon: CGFloat
     let compact: Bool
+    /// Le démarrage de la console : une fois par ouverture, pas à chaque retour sur la vue des pièces.
+    let debut: Date
     let parler: () -> Void
-    @State private var debut = Date.now
     @State private var apparue = false
     @Environment(\.accessibilityReduceMotion) private var reduire
     @Environment(\.animationsCoupees) private var immobile
 
-    init(choisi: Binding<String?>, rayon: CGFloat, compact: Bool = true, parler: @escaping () -> Void) {
+    init(
+        choisi: Binding<String?>, rayon: CGFloat, compact: Bool = true, debut: Date, parler: @escaping () -> Void
+    ) {
         _choisi = choisi
         self.rayon = rayon
         self.compact = compact
+        self.debut = debut
         self.parler = parler
     }
 
@@ -58,8 +62,10 @@ struct Roue: View {
         }
         .frame(width: rayon * 2, height: rayon * 2)
         .onAppear {
-            debut = .now
-            apparue = true
+            // démarrage déjà joué : les secteurs sont là tout de suite
+            var t = Transaction()
+            t.disablesAnimations = Date.now.timeIntervalSince(debut) > Reacteur.Etat.dureeDemarrage
+            withTransaction(t) { apparue = true }
         }
     }
 }
@@ -163,7 +169,7 @@ private struct Plaque: View {
                 f.fill(face(allume))
                 f.stroke(allume ? Console.ambre.opacity(0.9) : Self.contour.opacity(0.9), lineWidth: 2)
                     .shadow(color: allume ? Console.ambre.opacity(0.45) : .clear, radius: 8)
-                Liseres(forme: forme, allume: allume)
+                Habillage(secteur: secteur, forme: forme, rayon: rayon, nombre: nombre, choisi: choisi)
                 if choisi {
                     ArcSecteur(rayon: forme.exterieur + 4, debut: forme.debut, fin: forme.fin)
                         .stroke(Color(.champagne), lineWidth: 3)
@@ -171,7 +177,6 @@ private struct Plaque: View {
                 if enAttente {
                     f.stroke(Color(.sodium), style: StrokeStyle(lineWidth: 2, dash: [7, 5], dashPhase: marche))
                 }
-                Etiquette(secteur: secteur, forme: forme, rayon: rayon, nombre: nombre, choisi: choisi)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -282,43 +287,11 @@ private struct ArcSecteur: Shape {
     }
 }
 
-/// Les liserés d'un secteur : ombre intérieure, arête claire à gauche, arête sombre à droite, filet extérieur.
-private struct Liseres: View {
-    let forme: GeometrieRoue.Secteur
-    let allume: Bool
-
-    var body: some View {
-        Canvas { c, taille in
-            let centre = CGPoint(x: taille.width / 2, y: taille.height / 2)
-            func arc(_ r: Double, _ a0: Double, _ a1: Double, _ couleur: Color, _ largeur: Double) {
-                var p = Path()
-                p.addArc(center: centre, radius: r, startAngle: .radians(a0), endAngle: .radians(a1), clockwise: false)
-                c.stroke(p, with: .color(couleur), lineWidth: largeur)
-            }
-            func rayon(_ a: Double, _ r0: Double, _ r1: Double, _ couleur: Color, _ largeur: Double) {
-                var p = Path()
-                p.move(to: CGPoint(x: centre.x + cos(a) * r0, y: centre.y + sin(a) * r0))
-                p.addLine(to: CGPoint(x: centre.x + cos(a) * r1, y: centre.y + sin(a) * r1))
-                c.stroke(p, with: .color(couleur), lineWidth: largeur)
-            }
-            let s = forme
-            arc(s.interieur + 2, s.debut + 0.012, s.fin - 0.012, .black.opacity(0.75), 3)
-            rayon(
-                s.debut + 0.008, s.interieur + 3, s.exterieur - 3,
-                allume
-                    ? Color(red: 185 / 255, green: 154 / 255, blue: 102 / 255)
-                    : Color(red: 110 / 255, green: 137 / 255, blue: 154 / 255), 1)
-            rayon(s.fin - 0.008, s.interieur + 3, s.exterieur - 3, .black.opacity(0.65), 2)
-            arc(
-                s.exterieur - 3, s.debut + 0.01, s.fin - 0.01,
-                allume ? Console.ambre.opacity(0.6) : Console.reacteur.opacity(0.28), 2)
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-/// Le nom (en capitales, sur deux lignes si besoin) et la température d'un secteur, en son centre.
-private struct Etiquette: View {
+/// L'habillage d'un secteur, dessiné comme dans la console (`plates()`) : ombre intérieure, arête claire à gauche,
+/// arête sombre à droite, filet extérieur, puis le nom (en capitales, sur deux lignes si besoin) et la température.
+/// Le texte fait partie du dessin, comme dans la console ; la pièce, son état et sa température se lisent sur le
+/// bouton du secteur (VoiceOver).
+private struct Habillage: View {
     let secteur: Secteur
     let forme: GeometrieRoue.Secteur
     let rayon: CGFloat
@@ -326,31 +299,81 @@ private struct Etiquette: View {
     let choisi: Bool
 
     var body: some View {
-        let petit = rayon < 300
-        let fs = petit ? max(10, (rayon * 0.058).rounded()) : 13
-        let largeur = max(petit ? 40 : 56, 2 * forme.rayonMoyen * sin(.pi / Double(max(nombre, 1))) - (petit ? 8 : 14))
-        let x = rayon + cos(forme.milieu) * forme.rayonMoyen
-        let y = rayon + sin(forme.milieu) * forme.rayonMoyen
-        VStack(spacing: 1) {
-            Text(secteur.nom)
-                .font(.system(size: fs, weight: .bold))
-                .foregroundStyle(
-                    choisi
-                        ? Color(red: 1, green: 243 / 255, blue: 217 / 255)
-                        : secteur.allumee
-                            ? Color(red: 1, green: 211 / 255, blue: 148 / 255)
-                            : Color(red: 200 / 255, green: 213 / 255, blue: 224 / 255)
-                )
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-            // la console : #b3cbdc ; un peu plus clair ici, l'audit d'Apple jugeant ces petits chiffres trop pâles
-            Text(Format.valeur(secteur.temperature?.valeur, "°", 1))
-                .font(.system(size: fs, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color(red: 214 / 255, green: 228 / 255, blue: 238 / 255))
+        Canvas { c, taille in
+            let centre = CGPoint(x: taille.width / 2, y: taille.height / 2)
+            let allume = secteur.allumee
+            func arc(_ r: Double, _ a0: Double, _ a1: Double, _ couleur: Color, _ largeur: Double) {
+                var p = Path()
+                p.addArc(center: centre, radius: r, startAngle: .radians(a0), endAngle: .radians(a1), clockwise: false)
+                c.stroke(p, with: .color(couleur), lineWidth: largeur)
+            }
+            func trait(_ a: Double, _ r0: Double, _ r1: Double, _ couleur: Color, _ largeur: Double) {
+                var p = Path()
+                p.move(to: CGPoint(x: centre.x + cos(a) * r0, y: centre.y + sin(a) * r0))
+                p.addLine(to: CGPoint(x: centre.x + cos(a) * r1, y: centre.y + sin(a) * r1))
+                c.stroke(p, with: .color(couleur), lineWidth: largeur)
+            }
+            let s = forme
+            arc(s.interieur + 2, s.debut + 0.012, s.fin - 0.012, .black.opacity(0.75), 3)
+            trait(
+                s.debut + 0.008, s.interieur + 3, s.exterieur - 3,
+                allume
+                    ? Color(red: 185 / 255, green: 154 / 255, blue: 102 / 255)
+                    : Color(red: 110 / 255, green: 137 / 255, blue: 154 / 255), 1)
+            trait(s.fin - 0.008, s.interieur + 3, s.exterieur - 3, .black.opacity(0.65), 2)
+            arc(
+                s.exterieur - 3, s.debut + 0.01, s.fin - 0.01,
+                allume ? Console.ambre.opacity(0.6) : Console.reacteur.opacity(0.28), 2)
+
+            // le nom et la température, comme la console : taille selon R, retour à la ligne par mots
+            let petit = rayon < 300
+            let fs: CGFloat = petit ? max(10, (rayon * 0.058).rounded()) : 13
+            let k = fs / 13
+            let largeur: CGFloat = max(
+                petit ? 40 : 56, 2 * s.rayonMoyen * sin(.pi / Double(max(nombre, 1))) - (petit ? 8 : 14))
+            let tx: CGFloat = centre.x + cos(s.milieu) * s.rayonMoyen
+            let ty: CGFloat = centre.y + sin(s.milieu) * s.rayonMoyen
+            let couleurNom =
+                choisi
+                ? Color(red: 1, green: 243 / 255, blue: 217 / 255)
+                : allume
+                    ? Color(red: 1, green: 211 / 255, blue: 148 / 255)
+                    : Color(red: 200 / 255, green: 213 / 255, blue: 224 / 255)
+            let police = Font.system(size: fs, weight: .bold)
+            func resoudre(_ texte: String, _ police: Font, _ couleur: Color) -> GraphicsContext.ResolvedText {
+                c.resolve(Text(texte).font(police).foregroundStyle(couleur))
+            }
+            func longueur(_ texte: String) -> CGFloat {
+                resoudre(texte, police, couleurNom).measure(in: CGSize(width: CGFloat.infinity, height: .infinity))
+                    .width
+            }
+            var lignes = [""]
+            for mot in secteur.nom.split(separator: " ") {
+                let essai = (lignes[lignes.count - 1] + " " + mot).trimmingCharacters(in: .whitespaces)
+                if !lignes[lignes.count - 1].isEmpty, longueur(essai) > largeur {
+                    lignes.append(String(mot))
+                } else {
+                    lignes[lignes.count - 1] = essai
+                }
+            }
+            func ecrire(_ r: GraphicsContext.ResolvedText, x: CGFloat, y: CGFloat) {
+                let w = r.measure(in: CGSize(width: CGFloat.infinity, height: .infinity)).width
+                var t = c
+                t.translateBy(x: x, y: y)
+                if w > largeur { t.scaleBy(x: largeur / w, y: 1) }  // fillText(…, maxWidth) : resserré, jamais coupé
+                t.draw(r, at: .zero, anchor: .center)
+            }
+            let n = CGFloat(lignes.count - 1)
+            for (j, ligne) in lignes.enumerated() {
+                ecrire(resoudre(ligne, police, couleurNom), x: tx, y: ty - 8 * k - n * 8 * k + CGFloat(j) * 15 * k)
+            }
+            ecrire(
+                resoudre(
+                    Format.valeur(secteur.temperature?.valeur, "°", 1),
+                    .system(size: fs, weight: .semibold, design: .monospaced),
+                    Color(red: 179 / 255, green: 203 / 255, blue: 220 / 255)),
+                x: tx, y: ty + 9 * k + n * 7 * k)
         }
-        .frame(width: largeur)
-        .position(x: x, y: y)
         .allowsHitTesting(false)
     }
 }

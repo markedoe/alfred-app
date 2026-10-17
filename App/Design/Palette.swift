@@ -76,7 +76,7 @@ private struct TitreSection: ViewModifier {
                 .layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
             LinearGradient(colors: [Color(.trait), .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(minWidth: 24, maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity)
                 .frame(height: 2)
                 .accessibilityHidden(true)
         }

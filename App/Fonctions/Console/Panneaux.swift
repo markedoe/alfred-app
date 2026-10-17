@@ -292,7 +292,7 @@ struct PanneauEnvironnement: View {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(p.nom).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.texte))
-                            Text(p.etage).font(.caption).foregroundStyle(Color(.texteSecondaire))
+                            Text(p.etage).font(.caption.weight(.semibold)).foregroundStyle(Color(.texteSecondaire))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         Text(Format.valeur(p.temperature, "°", 1))

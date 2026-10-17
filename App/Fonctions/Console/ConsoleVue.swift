@@ -13,6 +13,8 @@ struct ConsoleVue: View {
     @State private var choisi: String?
     @State private var ecrire = false
     @State private var reglages = false
+    /// Le démarrage de la console (2,4 s), joué une fois par ouverture.
+    @State private var debut = Date.now
 
     enum VueConsole: Hashable, CaseIterable {
         case alfred, pieces, environnement
@@ -79,7 +81,7 @@ struct ConsoleVue: View {
     @ViewBuilder private var dispositionCompacte: some View {
         switch vue {
         case .pieces:
-            VuePieces(choisi: $choisi, compact: true)
+            VuePieces(choisi: $choisi, compact: true, debut: debut)
         case .alfred:
             PanneauAlfred()
                 .padding(12)
@@ -97,7 +99,7 @@ struct ConsoleVue: View {
                 .frame(width: etroit ? 270 : 310)
                 .padding(.vertical, etroit ? 12 : 16)
                 .padding(.horizontal, etroit ? 8 : 12)
-            VuePieces(choisi: $choisi, compact: false)
+            VuePieces(choisi: $choisi, compact: false, debut: debut)
             PanneauEnvironnement()
                 .frame(width: etroit ? 300 : 330)
                 .padding(.vertical, etroit ? 12 : 16)
@@ -114,6 +116,7 @@ struct VuePieces: View {
     @Environment(Conversation.self) private var conversation
     @Binding var choisi: String?
     let compact: Bool
+    let debut: Date
 
     var body: some View {
         GeometryReader { geo in
@@ -123,7 +126,7 @@ struct VuePieces: View {
                 ? min(geo.size.width * 0.485, geo.size.height * 0.47)
                 : min(geo.size.width * 0.46, geo.size.height * 0.46)
             ZStack(alignment: .bottom) {
-                Roue(choisi: $choisi, rayon: max(100, r), compact: compact) {
+                Roue(choisi: $choisi, rayon: max(100, r), compact: compact, debut: debut) {
                     Task { await conversation.basculerEcoute() }
                 }
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -244,7 +247,7 @@ private struct Lien: View {
                 }
             }
         }
-        .frame(minHeight: 44)
+        .frame(minWidth: 44, minHeight: 44)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Lien avec la maison")

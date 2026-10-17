@@ -65,18 +65,8 @@ struct Reacteur: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: intervalle, paused: immobile || scene != .active)) { contexte in
             let etat = Etat(date: contexte.date, debut: debut, fige: immobile || reduire)
-            ZStack {
-                Canvas { c, taille in
-                    dessiner(c, centre: CGPoint(x: taille.width / 2, y: taille.height / 2), etat: etat)
-                }
-                TexteNoyau(
-                    phase: phase, enConversation: enConversation, rayon: rayon, demarrage: etat.demarrage,
-                    sousTitre: sousTitre ?? (connecte ? "MAISON CONNECTÉE" : "CONNEXION"),
-                    action: action.flatMap { $0.visible(a: contexte.date) ? $0 : nil },
-                    date: contexte.date)
-                if let action, action.visible(a: contexte.date) {
-                    TexteAction(action: action, rayon: rayon, date: contexte.date, fige: etat.fige)
-                }
+            Canvas { c, taille in
+                dessiner(c, centre: CGPoint(x: taille.width / 2, y: taille.height / 2), etat: etat, date: contexte.date)
             }
         }
         .allowsHitTesting(false)
@@ -106,7 +96,7 @@ struct Reacteur: View {
 
     // MARK: - dessin
 
-    private func dessiner(_ c: GraphicsContext, centre: CGPoint, etat: Etat) {
+    private func dessiner(_ c: GraphicsContext, centre: CGPoint, etat: Etat, date: Date) {
         let maintenant = Date.now
         let dt = min(0.1, max(0, maintenant.timeIntervalSince(memoire.precedente ?? maintenant)))
         memoire.precedente = maintenant
@@ -123,6 +113,7 @@ struct Reacteur: View {
         rails(d, etat, vivant: vivant)
         atmosphere(d, etat, vivant: vivant)
         noyau(d, etat)
+        texteNoyau(d, etat, date: date)
         pulsationDemarrage(d, etat)
         lienCommande(d, etat)
         hudAction(d, etat)
@@ -395,6 +386,83 @@ struct Reacteur: View {
             (phase == .reflexion ? Console.ambre : Console.reacteur).opacity(0.9), 2.5)
     }
 
+    /// Le texte du noyau, dessiné comme dans la console (une partie du dessin, pas un élément d'accessibilité : l'état
+    /// se lit sur « Parler à Alfred » et la ligne d'état, l'heure dans la barre d'état) : « ALFRED » qui s'écrit au
+    /// démarrage, puis l'heure, ou ce qu'Alfred fait (PARLEZ, ANALYSE…), et le libellé d'une action en cours.
+    private func texteNoyau(_ d: Dessin, _ e: Etat, date: Date) {
+        var c = d.c
+        let rc = max(30, d.rayon * 0.16)
+        let centre = d.centre
+        func ecrire(_ texte: String, _ police: Font, _ couleur: Color, dy: Double, largeur: Double) {
+            let resolu = c.resolve(Text(texte).font(police).foregroundStyle(couleur))
+            let mesure = resolu.measure(in: CGSize(width: CGFloat.infinity, height: .infinity))
+            guard mesure.width > 0 else { return }
+            // comme fillText(…, maxWidth) : un texte trop large est resserré, jamais coupé
+            let echelle = min(1, largeur / mesure.width)
+            var t = c
+            t.translateBy(x: centre.x, y: centre.y + dy)
+            t.scaleBy(x: echelle, y: echelle)
+            t.draw(resolu, at: .zero, anchor: .center)
+        }
+        c.opacity = min(1, e.demarrage * 1.6)
+        if e.demarrage < 0.95 {
+            let n = min(6, max(0, Int((e.demarrage / 0.6 * 6).rounded())))
+            ecrire(
+                String("ALFRED".prefix(n)), .system(size: rc * 0.34, weight: .medium), Console.lueur, dy: -rc * 0.1,
+                largeur: rc * 1.8)
+            let k = min(1, max(0, (e.demarrage - 0.62) / 0.25))
+            if k > 0 {
+                c.opacity = k
+                ecrire(
+                    sousTitre ?? (connecte ? "MAISON CONNECTÉE" : "CONNEXION"),
+                    .system(size: max(8, rc * 0.16), weight: .medium),
+                    Color(red: 108 / 255, green: 131 / 255, blue: 150 / 255), dy: rc * 0.42, largeur: rc * 1.8)
+            }
+        } else if let libelle = libelleNoyau(date) {
+            let echec = action.map { $0.visible(a: date) && $0.etat == .echec } ?? false
+            ecrire(
+                libelle, .system(size: max(9, min(12, rc * 0.38)), weight: .semibold),
+                echec ? Console.echec : Console.lueur, dy: 0, largeur: rc * 1.8)
+        } else {
+            let heure = date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+            ecrire(
+                heure, .system(size: max(16, rc * 0.52), weight: .regular, design: .monospaced),
+                Color(red: 230 / 255, green: 242 / 255, blue: 251 / 255), dy: -rc * 0.08, largeur: rc * 1.8)
+            if d.rayon > 300 {
+                ecrire(
+                    "à votre service", .system(size: max(11, rc * 0.19), weight: .semibold), Color(.texteSecondaire),
+                    dy: rc * 0.48, largeur: rc * 1.8)
+            }
+        }
+        guard let action, action.visible(a: date) else { return }
+        let age = date.timeIntervalSince(action.debut)
+        let fin = action.fin.map { date.timeIntervalSince($0) / 2.2 } ?? 0
+        c.opacity = e.fige ? 1 : max(0, min(1, age * 5) * (1 - fin))
+        let couleur =
+            action.etat == .echec ? Console.echec : action.etat == .confirmee ? Console.ambre : Console.lueur
+        ecrire(
+            action.libelle, .system(size: max(11, min(14, d.rayon * 0.043)), weight: .semibold), couleur,
+            dy: d.rayon * 0.205, largeur: d.rayon * 0.5)
+    }
+
+    /// Ce que dit le noyau à la place de l'heure (la console : EXÉCUTION, CONFIRMÉ, ÉCHEC, PARLEZ, ANALYSE, RÉPONSE).
+    private func libelleNoyau(_ date: Date) -> String? {
+        if phase == .repos && !enConversation {
+            guard let action, action.visible(a: date) else { return nil }
+            switch action.etat {
+            case .attente: return "EXÉCUTION"
+            case .confirmee: return "CONFIRMÉ"
+            case .echec: return "ÉCHEC"
+            }
+        }
+        switch phase {
+        case .repos: return "UN INSTANT"
+        case .ecoute: return "PARLEZ"
+        case .reflexion: return "ANALYSE"
+        case .reponse: return "RÉPONSE"
+        }
+    }
+
     /// Au verrouillage du démarrage, une onde part de l'anneau.
     private func pulsationDemarrage(_ d: Dessin, _ e: Etat) {
         guard !e.fige, e.demarrage >= 0.82, e.demarrage < 1 else { return }
@@ -485,92 +553,4 @@ private struct Dessin {
 
     /// easeOut de la console (cubique).
     static func sortie(_ t: Double) -> Double { 1 - pow(1 - min(max(t, 0), 1), 3) }
-}
-
-/// Le texte du noyau : « ALFRED » qui s'écrit au démarrage, puis l'heure, ou ce qu'Alfred fait (PARLEZ, ANALYSE…).
-private struct TexteNoyau: View {
-    let phase: Conversation.Phase
-    let enConversation: Bool
-    let rayon: CGFloat
-    let demarrage: Double
-    let sousTitre: String
-    let action: ActionHUD?
-    let date: Date
-
-    var body: some View {
-        let rc = max(30, rayon * 0.16)
-        ZStack {
-            if demarrage < 0.95 {
-                let n = min(6, max(0, Int((demarrage / 0.6 * 6).rounded())))
-                Text(String("ALFRED".prefix(n)))
-                    .font(.system(size: rc * 0.34, weight: .medium))
-                    .foregroundStyle(Console.lueur)
-                    .offset(y: -rc * 0.1)
-                let k = min(1, max(0, (demarrage - 0.62) / 0.25))
-                Text(sousTitre)
-                    .font(.system(size: max(8, rc * 0.16), weight: .medium))
-                    .foregroundStyle(Color(red: 108 / 255, green: 131 / 255, blue: 150 / 255))
-                    .opacity(k)
-                    .offset(y: rc * 0.42)
-            } else if let libelle {
-                Text(libelle)
-                    .font(.system(size: max(9, min(12, rc * 0.38)), weight: .semibold))
-                    .foregroundStyle(action?.etat == .echec ? Console.echec : Console.lueur)
-            } else {
-                Text(date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                    .font(.system(size: max(16, rc * 0.52), weight: .regular, design: .monospaced))
-                    .foregroundStyle(Color(red: 230 / 255, green: 242 / 255, blue: 251 / 255))
-                    .offset(y: -rc * 0.08)
-                if rayon > 300 {
-                    Text("à votre service")
-                        .font(.system(size: max(11, rc * 0.19), weight: .semibold))
-                        .foregroundStyle(Color(.texteSecondaire))
-                        .offset(y: rc * 0.48)
-                }
-            }
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.6)
-        .frame(width: rc * 1.8, height: rc * 1.8)
-    }
-
-    private var libelle: String? {
-        if phase == .repos && !enConversation {
-            switch action?.etat {
-            case .attente?: return "EXÉCUTION"
-            case .confirmee?: return "CONFIRMÉ"
-            case .echec?: return "ÉCHEC"
-            case nil: return nil
-            }
-        }
-        switch phase {
-        case .repos: return "UN INSTANT"
-        case .ecoute: return "PARLEZ"
-        case .reflexion: return "ANALYSE"
-        case .reponse: return "RÉPONSE"
-        }
-    }
-}
-
-/// Le libellé de l'action, sous le noyau (« ALLUMAGE », « ALLUMAGE CONFIRMÉ », « CONFIRMATION NON REÇUE »).
-private struct TexteAction: View {
-    let action: ActionHUD
-    let rayon: CGFloat
-    let date: Date
-    let fige: Bool
-
-    var body: some View {
-        let age = date.timeIntervalSince(action.debut)
-        let fin = action.fin.map { date.timeIntervalSince($0) / 2.2 } ?? 0
-        Text(action.libelle)
-            .font(.system(size: max(11, min(14, rayon * 0.043)), weight: .semibold))
-            .foregroundStyle(
-                action.etat == .echec ? Console.echec : action.etat == .confirmee ? Console.ambre : Console.lueur
-            )
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .frame(width: rayon * 0.5)
-            .opacity(fige ? 1 : max(0, min(1, age * 5) * (1 - fin)))
-            .offset(y: rayon * 0.205)
-    }
 }
