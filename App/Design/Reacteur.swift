@@ -62,8 +62,6 @@ struct Reacteur: View {
         var precedente: Date?
     }
 
-    static let dureeDemarrage = 2.4
-
     var body: some View {
         TimelineView(.animation(minimumInterval: intervalle, paused: immobile || scene != .active)) { contexte in
             let etat = Etat(date: contexte.date, debut: debut, fige: immobile || reduire)
@@ -93,6 +91,8 @@ struct Reacteur: View {
     }
 
     struct Etat {
+        /// Le démarrage de la console : 2,4 s, sans jamais bloquer.
+        static let dureeDemarrage = 2.4
         let t: Double
         let demarrage: Double
         let fige: Bool
@@ -100,7 +100,7 @@ struct Reacteur: View {
         init(date: Date, debut: Date, fige: Bool) {
             self.fige = fige
             t = fige ? 0 : date.timeIntervalSinceReferenceDate
-            demarrage = fige ? 1 : min(max(date.timeIntervalSince(debut) / Reacteur.dureeDemarrage, 0), 1)
+            demarrage = fige ? 1 : min(max(date.timeIntervalSince(debut) / Etat.dureeDemarrage, 0), 1)
         }
     }
 
