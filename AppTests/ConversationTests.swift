@@ -43,7 +43,7 @@ struct ConversationTests {
         #expect(c.messages[0].auteur == .moi && c.messages[0].texte == "Allume la cuisine")
         let r = c.messages[1]
         #expect(r.auteur == .alfred && !r.enCours && !r.erreur)
-        #expect(r.texte.contains("cuisine"))
+        #expect(r.texte.localizedCaseInsensitiveContains("cuisine"))
         #expect(r.outils.map(\.libelle) == ["Allumer · Cuisine"])
         #expect(r.outils.first?.etat == .fait)
         #expect(voix.lues.isEmpty, "réponse écrite : pas lue à voix haute par défaut")

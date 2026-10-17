@@ -9,6 +9,7 @@ struct Noyau: View {
     let niveau: () -> Float
 
     @Environment(\.accessibilityReduceMotion) private var reduire
+    @Environment(\.animationsCoupees) private var immobile
     @Environment(\.colorScheme) private var schema
     /// Le niveau lissé, d'une image à l'autre (une boîte : la modifier ne redessine pas la vue).
     @State private var memoire = Memoire()
@@ -18,7 +19,7 @@ struct Noyau: View {
     }
 
     var body: some View {
-        TimelineView(.animation(paused: reduire && phase == .repos)) { contexte in
+        TimelineView(.animation(paused: immobile || (reduire && phase == .repos))) { contexte in
             Canvas { c, taille in
                 let t = contexte.date.timeIntervalSinceReferenceDate
                 dessiner(c, taille: taille, t: t)

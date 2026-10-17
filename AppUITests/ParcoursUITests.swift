@@ -9,10 +9,12 @@ final class ParcoursUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func lancer(sombre: Bool = false, tailleTexte: String? = nil) -> XCUIApplication {
+    /// `figee` : sans animations (audit et mesures : l'état final, jamais un écran en transition).
+    private func lancer(sombre: Bool = false, tailleTexte: String? = nil, figee: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "-AppleLanguages", "(fr)", "-AppleLocale", "fr_CH"]
         if sombre { app.launchArguments.append("-sombre") }
+        if figee { app.launchArguments.append("-sansAnimations") }
         if let tailleTexte { app.launchArguments += ["-UIPreferredContentSizeCategoryName", tailleTexte] }
         app.launch()
         return app
@@ -67,41 +69,68 @@ final class ParcoursUITests: XCTestCase {
     }
 
     func testAccessibiliteClair() throws {
-        try auditer(lancer())
+        try auditer(lancer(figee: true))
     }
 
     func testAccessibiliteSombre() throws {
-        try auditer(lancer(sombre: true))
+        try auditer(lancer(sombre: true, figee: true))
     }
 
-    /// Les plus grandes tailles de texte : captures de chaque écran, relues à l'œil (le texte grandit, rien n'est
-    /// coupé, tout reste atteignable).
+    /// La plus grande taille de texte : le texte grandit vraiment (mesuré), et des captures de chaque écran sont
+    /// jointes pour la relecture (rien n'est coupé, tout reste atteignable).
+    ///
+    /// La taille du texte se vérifie ici plutôt que par l'audit : sa sonde perd les éléments du bas de l'écran,
+    /// poussés hors de la vue quand le texte grandit (l'élément le plus bas de chaque écran était signalé, ses
+    /// semblables plus haut non). L'app n'emploie aucune taille de police fixe.
     func testGrandTexte() throws {
-        let app = lancer(tailleTexte: "UICTContentSizeCategoryAccessibilityXXXL")
-        XCTAssertTrue(app.buttons["noyau"].waitForExistence(timeout: 10))
-        capturer(app, "grand-texte-1-alfred")
-        app.tabBars.buttons["Maison"].tap()
-        XCTAssertTrue(app.buttons["Salon"].waitForExistence(timeout: 10))
-        capturer(app, "grand-texte-2-maison")
-        app.swipeUp()
-        capturer(app, "grand-texte-3-maison-suite")
-        app.buttons["reglages"].firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Réglages"].waitForExistence(timeout: 5))
-        capturer(app, "grand-texte-4-reglages")
-        app.swipeUp()
-        capturer(app, "grand-texte-5-reglages-suite")
+        let normal = hauteurs(lancer(figee: true))
+        let app = lancer(tailleTexte: "UICTContentSizeCategoryAccessibilityXXXL", figee: true)
+        let grand = hauteurs(app, captures: true)
+        for (nom, h) in normal {
+            let g = try XCTUnwrap(grand[nom], nom)
+            XCTAssertGreaterThan(g, h * 1.5, "« \(nom) » ne grandit pas avec le texte (\(h) → \(g) pt)")
+        }
     }
 
-    /// Le fondu des bords de défilement (iOS 26) estompe le contenu qui passe sous la barre d'onglets : mesuré à
-    /// environ 40 pt au-dessus d'elle (iPhone 17 Pro, iOS 26.5). Un élément dans cette zone est jugé sur son rendu
-    /// estompé ; il l'est normalement ailleurs (mêmes styles plus haut dans l'écran).
-    private static let zoneFonduBas: CGFloat = 60
+    /// La hauteur d'un texte en haut de chaque écran (toujours dans la vue, quelle que soit la taille du texte).
+    private func hauteurs(_ app: XCUIApplication, captures: Bool = false) -> [String: CGFloat] {
+        var h: [String: CGFloat] = [:]
+        let salutation = element(app, contenant: "Bonjour")
+        XCTAssertTrue(salutation.waitForExistence(timeout: 10))
+        h["salutation"] = salutation.frame.height
+        if captures { capturer(app, "grand-texte-1-alfred") }
+        app.tabBars.buttons["Maison"].tap()
+        let bureau = app.buttons["Bureau"]
+        XCTAssertTrue(bureau.waitForExistence(timeout: 10))
+        h["tuile Bureau"] = bureau.frame.height
+        if captures {
+            capturer(app, "grand-texte-2-maison")
+            app.swipeUp()
+            capturer(app, "grand-texte-3-maison-suite")
+        }
+        app.buttons["reglages"].firstMatch.tap()
+        let compte = element(app, contenant: "Connecté en tant que")
+        XCTAssertTrue(compte.waitForExistence(timeout: 5))
+        h["Connecté en tant que"] = compte.frame.height
+        if captures {
+            capturer(app, "grand-texte-4-reglages")
+            app.swipeUp()
+            capturer(app, "grand-texte-5-reglages-suite")
+        }
+        return h
+    }
 
-    /// Les trois écrans, chacun audité en entier : tous les problèmes sont listés dans UN échec, avec l'écran,
-    /// le type de problème, l'élément et sa place. Deux cas sont écartés, et listés à part :
-    /// - un élément dans le fondu du bas (ci-dessus) : contraste, taille du texte, texte coupé ;
-    /// - la taille du texte d'un bouton de barre de navigation : iOS la plafonne exprès (loupe « Large Content
-    ///   Viewer » à la place).
+    /// Le fondu des bords de défilement (iOS 26) estompe le contenu qui passe sous la barre d'onglets : il commence
+    /// 40 pt au-dessus d'elle (mesuré sur une capture : iPhone 17 Pro, iOS 26.5). Un élément dans cette zone est
+    /// jugé sur son rendu estompé ; ses semblables plus haut dans l'écran sont audités normalement.
+    private static let zoneFonduBas: CGFloat = 40
+
+    /// Les trois écrans, chacun audité en entier (sauf la taille du texte : voir `testGrandTexte`) : tous les
+    /// problèmes sont listés dans UN échec, avec l'écran, le type de problème, l'élément et sa place. Deux cas sont
+    /// écartés, et listés à part (pièce jointe « audit-ecartes ») :
+    /// - un élément dans le fondu du bas (ci-dessus) : contraste, texte coupé ;
+    /// - le champ de recherche du système (`.searchable`) : la couleur et la taille de son texte indicatif sont
+    ///   celles d'iOS, que l'app ne peut pas changer.
     private func auditer(_ app: XCUIApplication) throws {
         var problemes: [String] = []
         var ecartes: [String] = []
@@ -110,9 +139,9 @@ final class ParcoursUITests: XCTestCase {
             let barre = app.tabBars.firstMatch
             let limite =
                 sousBarreOnglets && barre.exists ? barre.frame.minY - Self.zoneFonduBas : .greatestFiniteMagnitude
-            let barresNavigation = app.navigationBars.allElementsBoundByIndex.map(\.frame)
-            let rendu: XCUIAccessibilityAuditType = [.contrast, .dynamicType, .textClipped]
-            try app.performAccessibilityAudit { probleme in
+            let rendu: XCUIAccessibilityAuditType = [.contrast, .textClipped]
+            try app.performAccessibilityAudit(for: XCUIAccessibilityAuditType.all.subtracting(.dynamicType)) {
+                probleme in
                 let cadre = probleme.element?.frame
                 let description =
                     "\(ecran) · \(probleme.compactDescription) · "
@@ -121,10 +150,8 @@ final class ParcoursUITests: XCTestCase {
                     + " · \(probleme.detailedDescription)"
                 if let cadre, rendu.contains(probleme.auditType), cadre.maxY > limite {
                     ecartes.append("fondu du bas · " + description)
-                } else if let cadre, probleme.auditType == .dynamicType,
-                    barresNavigation.contains(where: { $0.contains(cadre) })
-                {
-                    ecartes.append("barre de navigation · " + description)
+                } else if probleme.element?.elementType == .searchField, rendu.contains(probleme.auditType) {
+                    ecartes.append("champ de recherche du système · " + description)
                 } else {
                     problemes.append(description)
                 }
