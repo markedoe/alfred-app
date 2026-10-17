@@ -125,7 +125,7 @@ struct TuilePiece: View {
                         Color.clear.frame(width: 44, height: 44)
                         Spacer()
                         if let t = piece.temperature?.nombre {
-                            Text(t.formatted(.number.precision(.fractionLength(1))) + " °")
+                            Text(t.formatted(.number.precision(.fractionLength(1))) + "°")
                                 .font(.subheadline.monospacedDigit())
                                 .foregroundStyle(Color(.texteSecondaire))
                         }

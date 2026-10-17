@@ -113,13 +113,13 @@ actor MaisonDemo {
         if let piece, t.contains("allume") {
             return (
                 AppelOutil(id: UUID().uuidString, nom: "HassTurnOn", arguments: ["area": .texte(piece.nom)]),
-                ("turn_on", piece.id), "C’est fait : \(piece.nom.lowercased()) allumé."
+                ("turn_on", piece.id), "C’est fait : j’ai allumé la pièce \(piece.nom)."
             )
         }
         if let piece, t.contains("eteins") || t.contains("eteint") {
             return (
                 AppelOutil(id: UUID().uuidString, nom: "HassTurnOff", arguments: ["area": .texte(piece.nom)]),
-                ("turn_off", piece.id), "C’est fait : \(piece.nom.lowercased()) éteint."
+                ("turn_off", piece.id), "C’est fait : j’ai éteint la pièce \(piece.nom)."
             )
         }
         if t.contains("heure") {
