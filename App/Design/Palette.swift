@@ -155,8 +155,10 @@ struct StyleConsole: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.85)
+            .padding(.vertical, 6)
             .foregroundStyle(actif ? texte : Console.texteInactif)
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, minHeight: max(44, hauteur))

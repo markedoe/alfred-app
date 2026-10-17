@@ -172,6 +172,9 @@ struct EnTeteConsole: View {
                     .tracking(1.6)
                     .foregroundStyle(Color(.champagne))
             }
+            // la marque ne se resserre jamais : c'est l'espace entre elle et les boutons qui cède
+            .fixedSize()
+            .layoutPriority(1)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Alfred")
             .accessibilityAddTraits(.isHeader)
@@ -390,12 +393,15 @@ struct BasConsole: View {
             NiveauMicro()
             Text(statut)
                 .font(.caption.weight(conversation.phase == .ecoute ? .semibold : .regular))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(couleurStatut)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading)
                 .accessibilityAddTraits(.updatesFrequently)
                 .accessibilityIdentifier("statut")
         }
+        // les commandes grandissent avec le texte jusqu'à la 1re taille d'accessibilité (la roue garde sa place)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private var peutParler: Bool {
