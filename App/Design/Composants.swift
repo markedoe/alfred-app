@@ -5,7 +5,7 @@ import SwiftUI
 struct EtatLiaison: View {
     @Environment(Alfred.self) private var alfred
     /// L'état affiché : un état passager (connexion rapide, reconnexion réussie aussitôt) ne s'affiche pas.
-    @State private var affiche: ClientRelais.Etat = .pret
+    @State private var affiche: ClientRelais.Etat = .pret(versionHA: nil)
 
     var body: some View {
         Group {
