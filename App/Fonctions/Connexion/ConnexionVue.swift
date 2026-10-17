@@ -10,6 +10,7 @@ struct ConnexionVue: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                Console.fond
                 if let configuration = alfred.configuration {
                     PageConnexion(configuration: configuration, etat: $etat) { session in
                         alfred.connexionReussie(session)
@@ -21,21 +22,29 @@ struct ConnexionVue: View {
                 case .chargement:
                     ProgressView("Connexion à la maison…")
                         .controlSize(.large)
+                        .tint(Color(.faisceau))
+                        .foregroundStyle(Color(.texteSecondaire))
                 case .affichee:
                     EmptyView()
                 case .echec(let message):
-                    ContentUnavailableView {
-                        Label("Connexion impossible", systemImage: "wifi.exclamationmark")
-                    } description: {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Connexion impossible").titreSection()
                         Text(message)
-                    } actions: {
+                            .font(.callout)
+                            .foregroundStyle(Color(.texte))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("messageConnexion")
                         Button("Réessayer") { etat = .chargement }
-                            .buttonStyle(.glass)
+                            .buttonStyle(StyleConsole(genre: .principal))
                     }
+                    .padding(24)
+                    .frame(maxWidth: 520)
                 }
             }
             .navigationTitle("Connexion")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Console.bandeau, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Annuler", role: .cancel) { fermer() }

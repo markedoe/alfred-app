@@ -1,10 +1,15 @@
-# Alfred pour iPhone
+# Alfred pour iPhone, iPad et Mac
 
 L’app native d’**Alfred**, l’assistant vocal d’une maison pilotée par Home Assistant. On lui parle, il agit sur la
 maison et répond de sa voix ; on voit la maison pièce par pièce, avec l’état qu’elle confirme réellement.
 
+**C’est la console d’Alfred, en natif** (« Manor Command ») : la même roue des pièces autour du réacteur, les mêmes
+jauges, les mêmes panneaux Alfred et Environnement, sombre seulement. Sur iPhone (et iPad à la verticale), trois vues
+choisies en bas de l’écran ; au-delà de 1100 pt de large (iPad à l’horizontale, Mac à puce Apple), la disposition
+large de la console, côte à côte.
+
 **L’app ne parle qu’à la maison**, par son relais (le serveur de la console d’Alfred). Il n’y a ni cloud, ni compte
-tiers, ni suivi. La voix va de l’iPhone au relais, puis à Home Assistant, et jamais sur internet.
+tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, et jamais sur internet.
 
 ## Ce qu’elle fait (version 1, « Parler »)
 
@@ -15,18 +20,20 @@ tiers, ni suivi. La voix va de l’iPhone au relais, puis à Home Assistant, et 
   - On voit ce qu’Alfred fait (« Allumer · Cuisine ✓ ») et on l’entend répondre pendant que sa voix est synthétisée.
 - **Écrire à Alfred**
   - La réponse arrive par écrit. La lecture à voix haute est au choix, dans les réglages.
-- **La maison**
-  - Les pièces sont rangées par étage. On allume ou éteint une pièce d’un geste, et on règle chaque lampe et sa
-    luminosité.
+- **La maison (la roue)**
+  - Un secteur par pièce de la console (nom, température), ambre quand la lumière est allumée. Toucher un secteur
+    ouvre la pièce : ses mesures et un seul bouton, Allumer ou Éteindre. Le réacteur suit la commande (crochets,
+    « EXÉCUTION », puis « CONFIRMÉ »).
   - Un état n’est affiché qu’une fois **confirmé par la maison**. Sans confirmation en 8 s, l’échec est visible : il
     n’est jamais supposé ni renvoyé.
+- **L’environnement** : l’extérieur (météo), les pièces mesurées, l’énergie ; les jauges en bas de la console.
 
 ## Architecture
 
 | Élément | Rôle |
 |---|---|
 | `Paquets/AlfredKit` | Le cœur, sans interface ni dépendance : protocole du relais, automate du pipeline d’Assist, détection de la parole, modèle de la maison. **Testé sous Linux et macOS.** |
-| `App/` | L’app SwiftUI (iOS 26) : Liquid Glass, son (capture, voix en continu), sécurité (trousseau, épinglage TLS), écrans. |
+| `App/` | L’app SwiftUI (iOS 26, iPhone et iPad, Mac à puce Apple) : la console en natif (`App/Design`, `App/Fonctions/Console`), son (capture, voix en continu), sécurité (trousseau, épinglage TLS). |
 | `App/Demo` | Une maison de démonstration (sans réseau ni micro), pour les tests d’interface, les aperçus et les captures. |
 | `project.yml` | Le projet Xcode, généré par [XcodeGen](https://github.com/yonaskolb/XcodeGen). Le `.xcodeproj` n’est jamais versionné. |
 | `docs/` | Le contrat du relais, la sécurité. |

@@ -22,6 +22,7 @@ et les tests d’`AlfredKit` le vérifient.
 |---|---|
 | `GET /moi` | `{"connecte": bool, "nom": …, "user_id": …, "titre": "Monsieur" \| "Madame" \| "Mademoiselle" \| ""}`. `connecte: false` avec un cookie signifie que la session a été révoquée. |
 | `GET /maison/structure` | Version 1, réservée aux personnes connectées. Voir le détail ci-dessous. |
+| `GET /maison/console` | Version 1, réservée aux personnes connectées : la roue, les jauges et la météo de la console. |
 | `GET /tts/<jeton>` | La voix d’Alfred, servie **pendant** sa synthèse (MP3 en continu). |
 | `GET /static/ack/ack-<n><suffixe>.mp3` | Les clips d’accueil (« Bien, Monsieur »). Le suffixe vaut `""`, `-madame`, `-mademoiselle` ou `-neutre`. |
 
@@ -37,6 +38,23 @@ et les tests d’`AlfredKit` le vérifient.
 ```
 
 Une autre version, ou une absence de la route, laisse la maison **en liste simple**.
+
+**Détail de `GET /maison/console`** (réservée aux personnes connectées) : la roue, les jauges et la météo de la
+console, telles qu’elle les montre. L’app montre la même roue ; sans cette route, elle prend les pièces de
+`/maison/structure`.
+
+```json
+{
+  "version": 1,
+  "pieces": [{"nom": "SALON", "etage": "rdc", "lumiere": "light.…", "temperature": "sensor.…", "humidite": null, "air": null}],
+  "autres": [{"nom": "CAVE", "etage": "ss", "temperature": "sensor.…", "humidite": "sensor.…"}],
+  "jauges": [{"entite": "sensor.…", "libelle": "maison", "unite": "W", "max": 6000}],
+  "meteo": "weather.…",
+  "puissance": "sensor.…"
+}
+```
+
+`pieces` est dans l’ordre de la roue (le 1er secteur en haut, puis dans le sens des aiguilles d’une montre).
 
 ## WebSocket `wss://<relais>/ws`
 

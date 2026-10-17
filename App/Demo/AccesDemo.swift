@@ -14,6 +14,7 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
         switch chemin {
+        case "/maison/console": (200, Data(MaisonDemo.console.enTexte().utf8))
         case "/maison/structure": (200, Data(MaisonDemo.structure.enTexte().utf8))
         case "/moi": (200, Data(#"{"connecte":true,"nom":"Démo","user_id":null,"titre":"Monsieur"}"#.utf8))
         default: (404, Data())
@@ -21,84 +22,144 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
     }
 }
 
-/// L'état de la maison de démonstration.
+/// L'état de la maison de démonstration : une roue de console de 14 pièces aux noms génériques, des mesures, la météo
+/// et les jauges, comme la vraie (aucune donnée réelle).
 actor MaisonDemo {
-    static let pieces: [(id: String, nom: String, etage: String, lumieres: [(String, String, Bool)])] = [
-        (
-            "salon", "Salon", "rez",
-            [("light.salon_lampadaire", "Lampadaire", true), ("light.salon_plafond", "Plafonnier", false)]
+    struct Piece {
+        let id: String
+        let nom: String
+        let mot: String
+        let etage: String
+        let allumee: Bool
+        let temperature: String?
+        let humidite: String?
+    }
+
+    static let pieces: [Piece] = [
+        Piece(
+            id: "cinema", nom: "CINÉMA", mot: "cinema", etage: "ss", allumee: false, temperature: "19.2", humidite: "58"
         ),
-        ("cuisine", "Cuisine", "rez", [("light.cuisine_plan", "Plan de travail", true)]),
-        ("entree", "Entrée", "rez", [("light.entree", "Entrée", false)]),
-        (
-            "chambre", "Chambre", "etage",
-            [("light.chambre_chevet", "Chevet", false), ("light.chambre_plafond", "Plafonnier", false)]
+        Piece(
+            id: "salon", nom: "SALON", mot: "salon", etage: "rdc", allumee: true, temperature: "21.4", humidite: "52"),
+        Piece(
+            id: "cuisine", nom: "CUISINE", mot: "cuisine", etage: "rdc", allumee: true, temperature: "22.1",
+            humidite: nil),
+        Piece(
+            id: "manger", nom: "S. À MANGER", mot: "salle a manger", etage: "rdc", allumee: false, temperature: "21",
+            humidite: nil),
+        Piece(
+            id: "entree", nom: "ENTRÉE", mot: "entree", etage: "rdc", allumee: false, temperature: nil, humidite: nil),
+        Piece(
+            id: "terrasse", nom: "TERRASSE", mot: "terrasse", etage: "rdc", allumee: false, temperature: nil,
+            humidite: nil),
+        Piece(
+            id: "bureau", nom: "BUREAU", mot: "bureau", etage: "1er", allumee: true, temperature: "20.9", humidite: "48"
         ),
-        ("bureau", "Bureau", "etage", [("light.bureau", "Lampe de bureau", true)]),
-        ("terrasse", "Terrasse", "jardin", [("light.terrasse", "Guirlande", false)]),
+        Piece(
+            id: "chambre", nom: "CHAMBRE", mot: "chambre", etage: "1er", allumee: false, temperature: "19.5",
+            humidite: "50"),
+        Piece(
+            id: "sdb1", nom: "SDB 1ER", mot: "salle de bain", etage: "1er", allumee: false, temperature: "22.6",
+            humidite: "64"),
+        Piece(
+            id: "escalier", nom: "ESCALIER", mot: "escalier", etage: "1-2", allumee: false, temperature: nil,
+            humidite: nil),
+        Piece(id: "jeux", nom: "JEUX", mot: "jeux", etage: "2e", allumee: false, temperature: "20.3", humidite: "47"),
+        Piece(
+            id: "amis", nom: "CH. AMIS", mot: "chambre d'amis", etage: "2e", allumee: false, temperature: nil,
+            humidite: nil),
+        Piece(
+            id: "sdb2", nom: "SDB 2E", mot: "salle de bain du 2e", etage: "2e", allumee: false, temperature: "21.8",
+            humidite: "61"),
+        Piece(
+            id: "couloir", nom: "COULOIR 2E", mot: "couloir", etage: "2e", allumee: false, temperature: nil,
+            humidite: nil),
     ]
 
-    static let structure: ValeurJSON = [
+    static let console: ValeurJSON = [
         "version": 1,
-        "etages": [
-            ["id": "etage", "nom": "Étage", "niveau": 1], ["id": "rez", "nom": "Rez-de-chaussée", "niveau": 0],
-            ["id": "jardin", "nom": "Jardin", "niveau": -1],
-        ],
         "pieces": .liste(
             pieces.map { p in
                 [
-                    "id": .texte(p.id), "nom": .texte(p.nom), "etage": .texte(p.etage),
-                    "temperature": p.id == "terrasse" ? .nul : .texte("sensor.\(p.id)_temperature"), "humidite": .nul,
+                    "nom": .texte(p.nom), "etage": .texte(p.etage), "lumiere": .texte("light.demo_\(p.id)"),
+                    "temperature": p.temperature == nil ? .nul : .texte("sensor.demo_\(p.id)_t"),
+                    "humidite": p.humidite == nil ? .nul : .texte("sensor.demo_\(p.id)_h"),
+                    "air": p.id == "salon" ? "sensor.demo_salon_cov" : .nul,
                 ]
             }),
+        "autres": [
+            [
+                "nom": "BUANDERIE", "etage": "ss", "temperature": "sensor.demo_buanderie_t",
+                "humidite": "sensor.demo_buanderie_h",
+            ],
+            ["nom": "CAVE", "etage": "ss", "temperature": "sensor.demo_cave_t", "humidite": "sensor.demo_cave_h"],
+        ],
+        "jauges": [
+            ["entite": "sensor.demo_gpu", "libelle": "gpu", "unite": "°", "max": 100],
+            ["entite": "sensor.demo_pc", "libelle": "pc", "unite": "W", "max": 400],
+            ["entite": "sensor.demo_maison", "libelle": "maison", "unite": "W", "max": 6000],
+            ["entite": "sensor.demo_jour", "libelle": "jour", "unite": "kWh", "max": 10],
+        ],
+        "meteo": "weather.demo", "puissance": "sensor.demo_maison",
+    ]
+
+    /// Les pièces de HA (relais d'avant `/maison/console`) : une lumière par pièce.
+    static let structure: ValeurJSON = [
+        "version": 1,
+        "etages": [["id": "rdc", "nom": "Rez-de-chaussée", "niveau": 0]],
+        "pieces": .liste(pieces.map { ["id": .texte($0.id), "nom": .texte($0.nom.capitalized), "etage": "rdc"] }),
         "lumieres": .objet(
-            Dictionary(uniqueKeysWithValues: pieces.flatMap { p in p.lumieres.map { ($0.0, ValeurJSON.texte(p.id)) } })),
+            Dictionary(uniqueKeysWithValues: pieces.map { ("light.demo_\($0.id)", ValeurJSON.texte($0.id)) })),
     ]
 
     private var etats: [String: ValeurJSON] = {
         var e: [String: ValeurJSON] = [:]
-        for p in MaisonDemo.pieces {
-            for (id, nom, allumee) in p.lumieres {
-                e[id] = [
-                    "entity_id": .texte(id), "state": allumee ? "on" : "off",
-                    "attributes": [
-                        "friendly_name": .texte(nom), "supported_color_modes": ["brightness"],
-                        "brightness": allumee ? 180 : .nul,
-                    ],
-                ]
-            }
-            if p.id != "terrasse" {
-                let t =
-                    ["salon": "21.4", "cuisine": "22.1", "entree": "19.8", "chambre": "19.5", "bureau": "20.9"][p.id]
-                    ?? "20"
-                e["sensor.\(p.id)_temperature"] = [
-                    "entity_id": .texte("sensor.\(p.id)_temperature"), "state": .texte(t),
-                    "attributes": ["unit_of_measurement": "°C", "device_class": "temperature"],
-                ]
-            }
+        func capteur(_ id: String, _ valeur: String, _ unite: String) {
+            e[id] = [
+                "entity_id": .texte(id), "state": .texte(valeur), "attributes": ["unit_of_measurement": .texte(unite)],
+            ]
         }
+        for p in MaisonDemo.pieces {
+            let id = "light.demo_\(p.id)"
+            e[id] = [
+                "entity_id": .texte(id), "state": p.allumee ? "on" : "off",
+                "attributes": ["friendly_name": .texte(p.nom.capitalized), "supported_color_modes": ["brightness"]],
+            ]
+            if let t = p.temperature { capteur("sensor.demo_\(p.id)_t", t, "°C") }
+            if let h = p.humidite { capteur("sensor.demo_\(p.id)_h", h, "%") }
+        }
+        capteur("sensor.demo_salon_cov", "182", "µg/m³")
+        capteur("sensor.demo_buanderie_t", "20.5", "°C")
+        capteur("sensor.demo_buanderie_h", "59", "%")
+        capteur("sensor.demo_cave_t", "17.8", "°C")
+        capteur("sensor.demo_cave_h", "66", "%")
+        capteur("sensor.demo_gpu", "41", "°C")
+        capteur("sensor.demo_pc", "86", "W")
+        capteur("sensor.demo_maison", "640", "W")
+        capteur("sensor.demo_jour", "1.42", "kWh")
+        e["weather.demo"] = [
+            "entity_id": "weather.demo", "state": "partlycloudy",
+            "attributes": [
+                "temperature": 14.5, "temperature_unit": "°C", "humidity": 72, "wind_speed": 9,
+                "wind_speed_unit": "km/h", "wind_bearing": 250, "pressure": 1018, "pressure_unit": "hPa",
+                "uv_index": 2.1, "cloud_coverage": 40,
+            ],
+        ]
         return e
     }()
 
     var tous: ValeurJSON { .liste(Array(etats.values)) }
 
-    /// Applique un service de lumière ; rend les nouveaux états.
+    /// Applique un service de lumière (par entité, ou par pièce) ; rend les nouveaux états.
     func service(_ service: String, cible: ValeurJSON?, donnees: ValeurJSON?) -> [ValeurJSON] {
         var ids: [String] = []
         if let e = cible?["entity_id"]?.texte { ids = [e] }
         if let e = cible?["entity_id"]?.liste { ids = e.compactMap(\.texte) }
-        if let area = cible?["area_id"]?.texte {
-            ids = Self.pieces.first { $0.id == area }?.lumieres.map(\.0) ?? []
-        }
+        if let area = cible?["area_id"]?.texte { ids = ["light.demo_\(area)"] }
         return ids.compactMap { id in
             guard case .objet(var o)? = etats[id] else { return nil }
             let allumer = service == "turn_on" || (service == "toggle" && o["state"] == "off")
             o["state"] = allumer ? "on" : "off"
-            if case .objet(var a)? = o["attributes"] {
-                let pct = donnees?["brightness_pct"]?.nombre
-                a["brightness"] = allumer ? .nombre(((pct ?? 70) * 255 / 100).rounded()) : .nul
-                o["attributes"] = .objet(a)
-            }
             etats[id] = .objet(o)
             return .objet(o)
         }
@@ -107,19 +168,19 @@ actor MaisonDemo {
     /// La réponse de démonstration à une phrase.
     func repondre(_ texte: String) -> (outil: AppelOutil?, service: (String, String)?, reponse: String) {
         let t = texte.lowercased().folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr_CH"))
-        let piece = Self.pieces.first {
-            t.contains($0.nom.lowercased().folding(options: .diacriticInsensitive, locale: nil))
-        }
+        // le nom le plus long d'abord (« salle de bain du 2e » avant « salle de bain »)
+        let piece = Self.pieces.sorted { $0.mot.count > $1.mot.count }.first { t.contains($0.mot) }
+        let nom = piece.map { String($0.nom.prefix(1)) + $0.nom.dropFirst().lowercased() } ?? ""
         if let piece, t.contains("allume") {
             return (
-                AppelOutil(id: UUID().uuidString, nom: "HassTurnOn", arguments: ["area": .texte(piece.nom)]),
-                ("turn_on", piece.id), "C’est fait : j’ai allumé la pièce \(piece.nom)."
+                AppelOutil(id: UUID().uuidString, nom: "HassTurnOn", arguments: ["area": .texte(nom)]),
+                ("turn_on", piece.id), "C’est fait : j’ai allumé la pièce \(nom)."
             )
         }
         if let piece, t.contains("eteins") || t.contains("eteint") {
             return (
-                AppelOutil(id: UUID().uuidString, nom: "HassTurnOff", arguments: ["area": .texte(piece.nom)]),
-                ("turn_off", piece.id), "C’est fait : j’ai éteint la pièce \(piece.nom)."
+                AppelOutil(id: UUID().uuidString, nom: "HassTurnOff", arguments: ["area": .texte(nom)]),
+                ("turn_off", piece.id), "C’est fait : j’ai éteint la pièce \(nom)."
             )
         }
         if t.contains("heure") {

@@ -72,6 +72,13 @@ jobs:
         run: |
           xcrun swift-format lint --strict --recursive \
             App AppTests AppUITests Paquets/AlfredKit/Sources Paquets/AlfredKit/Tests Paquets/AlfredKit/Package.swift
+      - name: Aucune taille de texte figée
+        # les textes suivent la taille choisie (Dynamic Type) : une taille ne s'écrit qu'à partir d'une mesure
+        # (@ScaledMetric) ou de la géométrie d'un dessin, jamais en chiffres
+        run: |
+          if grep -rnE '\.system\(size: *[0-9]' App; then
+            echo "::error::taille de texte figée (utiliser un style de texte ou @ScaledMetric)"; exit 1
+          fi
       - name: AlfredKit (macOS)
         run: swift test --package-path Paquets/AlfredKit --parallel
       - name: Projet (XcodeGen)
@@ -87,25 +94,40 @@ jobs:
             -destination "id=${{ steps.simulateur.outputs.udid }}" \
             -resultBundlePath "$RUNNER_TEMP/Resultats.xcresult" \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+      - name: iPad, disposition large
+        if: always()
+        run: |
+          set -o pipefail
+          ipad=$(scripts/simulateur.sh ipad)
+          xcodebuild test -quiet \
+            -project Alfred.xcodeproj -scheme Alfred \
+            -destination "id=$ipad" \
+            -only-testing:AlfredUITests/ParcoursUITests/testDispositionLarge \
+            -resultBundlePath "$RUNNER_TEMP/ResultatsIPad.xcresult" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild-ipad.log"
       - name: Résumé des tests (échecs, captures)
         if: always()
         run: |
-          R="$RUNNER_TEMP/Resultats.xcresult"
-          [ -d "$R" ] || { echo "pas de résultats"; exit 0; }
-          if xcrun xcresulttool get test-results summary --path "$R" --compact > "$RUNNER_TEMP/resume.json"; then
-            {
-              echo '```'
-              jq -r '"\(.result) : \(.passedTests) réussis, \(.failedTests) en échec, \(.skippedTests) ignorés",
-                (.testFailures[]? | "✘ \(.testIdentifierString // .testName)", (.failureText | split("\n")[] | "✘   \(.)"))' \
-                "$RUNNER_TEMP/resume.json"
-              echo '```'
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            xcrun xcresulttool help get test-results || true
-          fi
           mkdir -p "$RUNNER_TEMP/captures"
-          xcrun xcresulttool export attachments --path "$R" --output-path "$RUNNER_TEMP/captures" \
-            || xcrun xcresulttool help export || true
+          for nom in Resultats ResultatsIPad; do
+            R="$RUNNER_TEMP/$nom.xcresult"
+            [ -d "$R" ] || { echo "$nom : pas de résultats"; continue; }
+            if xcrun xcresulttool get test-results summary --path "$R" --compact > "$RUNNER_TEMP/resume.json"; then
+              {
+                echo "$nom"
+                echo '```'
+                jq -r '"\(.result) : \(.passedTests) réussis, \(.failedTests) en échec, \(.skippedTests) ignorés",
+                  (.testFailures[]? | "✘ \(.testIdentifierString // .testName)", (.failureText | split("\n")[] | "✘   \(.)"))' \
+                  "$RUNNER_TEMP/resume.json"
+                echo '```'
+              } | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              xcrun xcresulttool help get test-results || true
+            fi
+            mkdir -p "$RUNNER_TEMP/captures/$nom"
+            xcrun xcresulttool export attachments --path "$R" --output-path "$RUNNER_TEMP/captures/$nom" \
+              || xcrun xcresulttool help export || true
+          done
       - name: Captures d'écran
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -121,5 +143,7 @@ jobs:
           name: resultats-ios
           path: |
             ${{ runner.temp }}/Resultats.xcresult
+            ${{ runner.temp }}/ResultatsIPad.xcresult
             ${{ runner.temp }}/xcodebuild.log
+            ${{ runner.temp }}/xcodebuild-ipad.log
           retention-days: 14

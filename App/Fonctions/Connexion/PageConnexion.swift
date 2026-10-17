@@ -130,15 +130,20 @@ struct PageConnexion: UIViewRepresentable {
             etat.wrappedValue = .echec(message)
         }
 
+        /// Le message, suivi du code technique de l'erreur (« code -1202 ») : de quoi trouver la cause d'un coup.
         static func message(_ erreur: any Error) -> String {
             let e = erreur as NSError
+            return texte(e) + " (\(e.domain == NSURLErrorDomain ? "code" : e.domain) \(e.code))"
+        }
+
+        private static func texte(_ e: NSError) -> String {
             if e.domain == NSURLErrorDomain {
                 switch e.code {
                 case NSURLErrorCancelled:
                     return "La connexion a été interrompue. Réessayez."
                 case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorCannotFindHost,
                     NSURLErrorCannotConnectToHost, NSURLErrorTimedOut:
-                    return "La maison ne répond pas. Vérifiez que vous êtes sur le Wi-Fi de la maison."
+                    return "La maison ne répond pas. Vérifiez que vous êtes sur le Wi-Fi de la maison ou sur son VPN."
                 case NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasUnknownRoot,
                     NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateNotYetValid,
                     NSURLErrorSecureConnectionFailed:

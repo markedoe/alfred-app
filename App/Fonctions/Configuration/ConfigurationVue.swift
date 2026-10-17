@@ -8,9 +8,15 @@ struct ConfigurationVue: View {
     @FocusState private var focus: Bool
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
+        ZStack {
+            Console.fond
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Marque()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                        .padding(.bottom, 12)
+                    Text("Adresse de la maison").titreSection()
                     TextField("relais.maison.example", text: $adresse)
                         .keyboardType(.URL)
                         .textContentType(.URL)
@@ -19,31 +25,32 @@ struct ConfigurationVue: View {
                         .focused($focus)
                         .submitLabel(.continue)
                         .onSubmit(continuer)
+                        .font(.callout)
+                        .foregroundStyle(Color(.texte))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 48)
+                        .background(Console.caseMesure, in: .rect(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.acier), lineWidth: 1.5))
+                        .accessibilityLabel("Adresse de la maison")
                         .accessibilityIdentifier("adresseRelais")
-                } header: {
-                    Text("Adresse de la maison")
-                } footer: {
-                    if invalide {
-                        Text("Une adresse https est attendue, sans chemin (par exemple relais.maison.example).")
-                            .foregroundStyle(Color(.alerte))
-                    } else {
-                        Text("L’adresse du relais d’Alfred dans votre maison. Elle ne vous sera demandée qu’une fois.")
-                    }
-                }
-                Section {
-                    BoutonDemo()
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .navigationTitle("Bienvenue")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
+                    Text(
+                        invalide
+                            ? "Une adresse https est attendue, sans chemin (par exemple relais.maison.example)."
+                            : "L’adresse du relais d’Alfred dans votre maison. Elle ne vous sera demandée qu’une fois."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(invalide ? Color(.alerte) : Color(.texteSecondaire))
                     Button("Continuer", action: continuer)
+                        .buttonStyle(StyleConsole(genre: .principal))
                         .disabled(adresse.trimmingCharacters(in: .whitespaces).isEmpty)
+                    BoutonDemo()
                 }
+                .padding(.horizontal, 24)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-            .onAppear { focus = true }
         }
+        .onAppear { focus = true }
     }
 
     private func continuer() {

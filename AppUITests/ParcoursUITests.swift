@@ -1,8 +1,10 @@
+import UIKit
 import XCTest
 
-/// Les parcours principaux, sur la maison de démonstration (aucun réseau, aucun micro) :
-/// écrire à Alfred, voir son action et sa réponse ; allumer une pièce depuis la maison ; l'audit d'accessibilité
-/// d'Apple sur chaque écran, en clair et en sombre. Des captures sont jointes au résultat (relecture du design).
+/// Les parcours principaux, sur la maison de démonstration (aucun réseau, aucun micro) : écrire à Alfred et lire sa
+/// réponse dans les échanges ; allumer une pièce depuis la roue, l'état affiché étant celui que la maison confirme ;
+/// l'audit d'accessibilité d'Apple sur chaque vue ; la disposition large (iPad à l'horizontale). Des captures sont
+/// jointes au résultat : elles se comparent à celles de la console web (relecture du design).
 @MainActor
 final class ParcoursUITests: XCTestCase {
     override func setUp() async throws {
@@ -10,27 +12,30 @@ final class ParcoursUITests: XCTestCase {
     }
 
     /// Toujours sans animations (« -sansAnimations ») : l'audit et les mesures lisent l'état final, et XCTest sait
-    /// quand l'app est au repos (le noyau, animé sans fin, l'en empêche sinon).
-    private func lancer(sombre: Bool = false, tailleTexte: String? = nil) -> XCUIApplication {
+    /// quand l'app est au repos (le réacteur, animé sans fin, l'en empêche sinon).
+    private func lancer(tailleTexte: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demo", "-AppleLanguages", "(fr)", "-AppleLocale", "fr_CH"]
-        if sombre { app.launchArguments.append("-sombre") }
-        app.launchArguments.append("-sansAnimations")
+        app.launchArguments = ["-demo", "-AppleLanguages", "(fr)", "-AppleLocale", "fr_CH", "-sansAnimations"]
         if let tailleTexte { app.launchArguments += ["-UIPreferredContentSizeCategoryName", tailleTexte] }
         app.launch()
         return app
     }
 
-    /// La démo est prête (suggestions actives) : l'audit porte sur l'état stable, pas sur le démarrage.
+    /// La démo est prête (« Parler à Alfred » actif) : l'audit porte sur l'état stable, pas sur le démarrage.
     private func attendrePret(_ app: XCUIApplication) {
-        let suggestion = app.buttons["Quelle heure est-il ?"]
-        let actif = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: suggestion)
+        let parler = bouton(app, "parler")
+        XCTAssertTrue(parler.waitForExistence(timeout: 10))
+        let actif = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: parler)
         XCTAssertEqual(XCTWaiter().wait(for: [actif], timeout: 10), .completed, "la démo ne devient pas prête")
     }
 
     /// Un élément dont le libellé d'accessibilité contient ce texte (les messages regroupent leurs textes).
     private func element(_ app: XCUIApplication, contenant texte: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", texte)).firstMatch
+    }
+
+    private func bouton(_ app: XCUIApplication, _ identifiant: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@", identifiant)).firstMatch
     }
 
     private func capturer(_ app: XCUIApplication, _ nom: String) {
@@ -40,49 +45,87 @@ final class ParcoursUITests: XCTestCase {
         add(c)
     }
 
+    /// Choisir une vue de la console (sur téléphone ; en disposition large, toutes sont visibles).
+    private func vue(_ app: XCUIApplication, _ nom: String) {
+        let onglet = bouton(app, "onglet-\(nom)")
+        if onglet.exists { onglet.tap() }
+    }
+
     func testEcrireAAlfred() throws {
         let app = lancer()
+        attendrePret(app)
+        capturer(app, "1-pieces")
+        bouton(app, "ecrire").tap()
         let saisie = app.textFields["saisie"].firstMatch.exists ? app.textFields["saisie"] : app.textViews["saisie"]
-        XCTAssertTrue(saisie.waitForExistence(timeout: 10))
-        capturer(app, "1-accueil-alfred")
+        XCTAssertTrue(saisie.waitForExistence(timeout: 5))
         saisie.tap()
         saisie.typeText("Allume la cuisine")
         // par l'identifiant seul : la touche « envoyer » du clavier français porte le même libellé
-        app.buttons.matching(NSPredicate(format: "identifier == %@", "envoyer")).firstMatch.tap()
+        bouton(app, "envoyer").tap()
+        vue(app, "alfred")
         XCTAssertTrue(element(app, contenant: "Allumer · Cuisine, fait").waitForExistence(timeout: 10))
         XCTAssertTrue(
             element(app, contenant: "C’est fait : j’ai allumé la pièce Cuisine.").waitForExistence(timeout: 10))
-        capturer(app, "2-conversation")
+        capturer(app, "2-alfred-echanges")
+        vue(app, "environnement")
+        XCTAssertTrue(element(app, contenant: "Extérieur").waitForExistence(timeout: 5))
+        capturer(app, "3-environnement")
     }
 
     func testAllumerUnePiece() throws {
         let app = lancer()
-        app.tabBars.buttons["Maison"].tap()
-        let entree = app.buttons["Allumer Entrée"]
+        attendrePret(app)
+        let entree = bouton(app, "piece-Entrée")
         XCTAssertTrue(entree.waitForExistence(timeout: 10))
-        capturer(app, "3-maison")
+        XCTAssertTrue((entree.value as? String ?? "").contains("éteinte"), "\(entree.value ?? "")")
         entree.tap()
+        let action = bouton(app, "actionPiece")
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        XCTAssertEqual(action.label, "Allumer")
+        capturer(app, "4-carte-piece")
+        action.tap()
         // l'état affiché est celui que la maison confirme
-        XCTAssertTrue(app.buttons["Éteindre Entrée"].waitForExistence(timeout: 10))
-        app.buttons["Salon"].tap()
-        XCTAssertTrue(app.navigationBars["Salon"].waitForExistence(timeout: 5))
-        capturer(app, "4-piece")
+        let etat = app.staticTexts["etatPiece"]
+        let allumee = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "Lumière allumée"), object: etat)
+        XCTAssertEqual(XCTWaiter().wait(for: [allumee], timeout: 10), .completed, "la maison n'a pas confirmé")
+        XCTAssertEqual(action.label, "Éteindre")
+        XCTAssertTrue((entree.value as? String ?? "").contains("allumée"), "\(entree.value ?? "")")
+        capturer(app, "5-piece-allumee")
     }
 
-    func testAccessibiliteClair() throws {
-        try auditer(lancer())
+    func testAccessibilite() throws {
+        let app = lancer()
+        attendrePret(app)
+        try auditerEcrans(app, ["Pièces", "Alfred", "Environnement", "Réglages"])
     }
 
-    func testAccessibiliteSombre() throws {
-        try auditer(lancer(sombre: true))
+    /// La disposition large de la console (iPad à l'horizontale, Mac) : l'assistant, la roue, l'environnement et le
+    /// bas, côte à côte. Ne tourne que sur iPad (la CI le lance sur un simulateur d'iPad).
+    func testDispositionLarge() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "disposition large : iPad seulement")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = lancer()
+        attendrePret(app)
+        XCTAssertFalse(bouton(app, "onglet-pieces").exists, "pas d'onglets en disposition large")
+        XCTAssertTrue(element(app, contenant: "Extérieur").exists)
+        capturer(app, "ipad-1-large")
+        bouton(app, "piece-Salon").tap()
+        XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
+        capturer(app, "ipad-2-piece")
+        try auditerEcrans(app, ["Large"])
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(bouton(app, "onglet-pieces").waitForExistence(timeout: 5), "onglets en disposition étroite")
+        capturer(app, "ipad-3-portrait")
     }
 
-    /// La plus grande taille de texte : le texte grandit vraiment (mesuré), et des captures de chaque écran sont
+    /// La plus grande taille de texte : le texte grandit vraiment (mesuré), et des captures de chaque vue sont
     /// jointes pour la relecture (rien n'est coupé, tout reste atteignable).
     ///
-    /// La taille du texte se vérifie ici plutôt que par l'audit : sa sonde perd les éléments du bas de l'écran,
-    /// poussés hors de la vue quand le texte grandit (l'élément le plus bas de chaque écran était signalé, ses
-    /// semblables plus haut non). L'app n'emploie aucune taille de police fixe.
+    /// La taille du texte se vérifie ici plutôt que par l'audit : sa sonde perd les éléments poussés hors de la vue
+    /// quand le texte grandit. Les textes de l'app suivent tous la taille choisie, sauf ceux dessinés dans la roue (le
+    /// nom et la température d'une pièce, à la taille du secteur) et l'en-tête, plafonné : chaque pièce garde son nom
+    /// et sa valeur pour VoiceOver, et la vue Environnement les donne en texte.
     func testGrandTexte() throws {
         let normal = hauteurs(lancer())
         let app = lancer(tailleTexte: "UICTContentSizeCategoryAccessibilityXXXL")
@@ -93,91 +136,75 @@ final class ParcoursUITests: XCTestCase {
         }
     }
 
-    /// La hauteur d'un texte en haut de chaque écran (toujours dans la vue, quelle que soit la taille du texte).
+    /// La hauteur d'un texte en haut de chaque vue (toujours visible, quelle que soit la taille du texte).
     private func hauteurs(_ app: XCUIApplication, captures: Bool = false) -> [String: CGFloat] {
         var h: [String: CGFloat] = [:]
-        let salutation = element(app, contenant: "Bonjour")
-        XCTAssertTrue(salutation.waitForExistence(timeout: 10))
-        h["salutation"] = salutation.frame.height
-        if captures { capturer(app, "grand-texte-1-alfred") }
-        app.tabBars.buttons["Maison"].tap()
-        let bureau = app.buttons["Bureau"]
-        XCTAssertTrue(bureau.waitForExistence(timeout: 10))
-        h["tuile Bureau"] = bureau.frame.height
+        attendrePret(app)
+        if captures { capturer(app, "grand-texte-1-pieces") }
+        vue(app, "alfred")
+        let briefing = app.staticTexts["briefing"]
+        XCTAssertTrue(briefing.waitForExistence(timeout: 5))
+        h["briefing"] = briefing.frame.height
+        if captures { capturer(app, "grand-texte-2-alfred") }
+        vue(app, "environnement")
+        let exterieur = element(app, contenant: "Extérieur")
+        XCTAssertTrue(exterieur.waitForExistence(timeout: 5))
+        h["Extérieur"] = exterieur.frame.height
         if captures {
-            capturer(app, "grand-texte-2-maison")
+            capturer(app, "grand-texte-3-environnement")
             app.swipeUp()
-            capturer(app, "grand-texte-3-maison-suite")
+            capturer(app, "grand-texte-4-environnement-suite")
         }
-        app.buttons["reglages"].firstMatch.tap()
+        bouton(app, "reglages").tap()
         let compte = element(app, contenant: "Connecté en tant que")
         XCTAssertTrue(compte.waitForExistence(timeout: 5))
         h["Connecté en tant que"] = compte.frame.height
         if captures {
-            capturer(app, "grand-texte-4-reglages")
+            capturer(app, "grand-texte-5-reglages")
             app.swipeUp()
-            capturer(app, "grand-texte-5-reglages-suite")
+            capturer(app, "grand-texte-6-reglages-suite")
             app.swipeUp()
-            capturer(app, "grand-texte-6-reglages-fin")
+            capturer(app, "grand-texte-7-reglages-fin")
         }
         return h
     }
 
-    /// Le fondu des bords de défilement (iOS 26) estompe le contenu qui passe sous la barre d'onglets : il commence
-    /// 40 pt au-dessus d'elle (mesuré sur une capture : iPhone 17 Pro, iOS 26.5). Un élément dans cette zone est
-    /// jugé sur son rendu estompé ; ses semblables plus haut dans l'écran sont audités normalement.
-    private static let zoneFonduBas: CGFloat = 40
-
     private static let engagementMicro =
         "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan."
 
-    /// Les trois écrans, chacun audité en entier (sauf la taille du texte : voir `testGrandTexte`) : tous les
-    /// problèmes sont listés dans UN échec, avec l'écran, le type de problème, l'élément et sa place. Deux cas sont
-    /// écartés, et listés à part (pièce jointe « audit-ecartes ») :
-    /// - un élément dans le fondu du bas (ci-dessus) : contraste, texte coupé ;
-    /// - le champ de recherche du système (`.searchable`) : la couleur et la taille de son texte indicatif sont
-    ///   celles d'iOS, que l'app ne peut pas changer ;
-    /// - « texte coupé » prédit pour l'engagement du micro, démenti par la capture « grand-texte-6-reglages-fin »
-    ///   (AccessibilityXXXL : le texte passe à la ligne jusqu'au bout, rien n'est coupé).
-    private func auditer(_ app: XCUIApplication) throws {
+    /// Les vues de la console et les réglages, chacune auditée en entier (sauf la taille du texte : voir
+    /// `testGrandTexte`) : tous les problèmes sont listés dans UN échec, avec la vue, le type de problème, l'élément
+    /// et sa place. Un cas est écarté, et listé à part (pièce jointe « audit-ecartes ») : « texte coupé » prédit pour
+    /// l'engagement du micro, démenti par la capture « grand-texte-7-reglages-fin » (le texte passe à la ligne
+    /// jusqu'au bout, rien n'est coupé).
+    private func auditerEcrans(_ app: XCUIApplication, _ ecrans: [String]) throws {
         var problemes: [String] = []
         var ecartes: [String] = []
-        func auditerEcran(_ ecran: String, sousBarreOnglets: Bool) throws {
-            // la feuille des réglages couvre la barre d'onglets, qui reste pourtant dans l'arbre d'accessibilité
-            let barre = app.tabBars.firstMatch
-            let limite =
-                sousBarreOnglets && barre.exists ? barre.frame.minY - Self.zoneFonduBas : .greatestFiniteMagnitude
-            let rendu: XCUIAccessibilityAuditType = [.contrast, .textClipped]
+        for ecran in ecrans {
+            switch ecran {
+            case "Alfred": vue(app, "alfred")
+            case "Environnement": vue(app, "environnement")
+            case "Réglages":
+                bouton(app, "reglages").tap()
+                XCTAssertTrue(app.navigationBars["Réglages & état"].waitForExistence(timeout: 5))
+            default: vue(app, "pieces")
+            }
             try app.performAccessibilityAudit(for: XCUIAccessibilityAuditType.all.subtracting(.dynamicType)) {
                 probleme in
-                let cadre = probleme.element?.frame
                 let description =
                     "\(ecran) · \(probleme.compactDescription) · "
                     + (probleme.element.map { "« \($0.label) » \(Int($0.frame.minY))…\(Int($0.frame.maxY)) pt" }
                         ?? "sans élément (\(probleme.debugDescription))")
                     + " · \(probleme.detailedDescription)"
-                if let cadre, rendu.contains(probleme.auditType), cadre.maxY > limite {
-                    ecartes.append("fondu du bas · " + description)
-                } else if probleme.element?.elementType == .searchField, rendu.contains(probleme.auditType) {
-                    ecartes.append("champ de recherche du système · " + description)
-                } else if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
+                if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
                     ecartes.append("vérifié en très grand texte · " + description)
                 } else {
                     problemes.append(description)
                 }
                 return true
             }
+            capturer(app, "audit-\(ecran)")
         }
-        XCTAssertTrue(app.buttons["noyau"].waitForExistence(timeout: 10))
-        attendrePret(app)
-        try auditerEcran("Alfred", sousBarreOnglets: true)
-        app.tabBars.buttons["Maison"].tap()
-        XCTAssertTrue(app.buttons["Salon"].waitForExistence(timeout: 10))
-        try auditerEcran("Maison", sousBarreOnglets: true)
-        app.buttons["reglages"].firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Réglages"].waitForExistence(timeout: 5))
-        try auditerEcran("Réglages", sousBarreOnglets: false)
-        capturer(app, "audit-reglages")
         let note = XCTAttachment(string: ecartes.joined(separator: "\n"))
         note.name = "audit-ecartes"
         note.lifetime = .keepAlways

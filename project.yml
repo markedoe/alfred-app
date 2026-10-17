@@ -62,10 +62,18 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: Fond
+        # sombre seulement, comme la console (feuilles, alertes et clavier du système compris)
+        UIUserInterfaceStyle: Dark
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # iPad (et Mac) : toutes les orientations ; au-delà de 1100 pt de large, la disposition large de la console
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIRequiredDeviceCapabilities:
           - arm64
           - microphone
@@ -83,12 +91,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.markedoe.alfred
         PRODUCT_NAME: Alfred
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone et iPad ; le Mac (puce Apple) ouvre la version iPad dans une fenêtre
+        TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Champagne
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: Faisceau
         ENABLE_PREVIEWS: YES
         SUPPORTS_MACCATALYST: NO
-        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleDefault
 
   AlfredTests:

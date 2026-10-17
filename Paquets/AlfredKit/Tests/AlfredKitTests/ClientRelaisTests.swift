@@ -56,11 +56,18 @@ final class AccesFactice: AccesRelais, @unchecked Sendable {
     private let verrou = NSLock()
     private var _liaisons: [LiaisonFactice] = []
     private var _structure: ValeurJSON?
+    private var _console: ValeurJSON?
     var liaisons: [LiaisonFactice] { verrou.withLock { _liaisons } }
     /// La réponse de `/maison/structure` ; nil = 404 (relais d'avant la route).
     var structure: ValeurJSON? {
         get { verrou.withLock { _structure } }
         set { verrou.withLock { _structure = newValue } }
+    }
+
+    /// La réponse de `/maison/console` ; nil = 404 (relais d'avant la route).
+    var console: ValeurJSON? {
+        get { verrou.withLock { _console } }
+        set { verrou.withLock { _console = newValue } }
     }
 
     func ouvrir() async throws -> any Liaison {
@@ -70,8 +77,9 @@ final class AccesFactice: AccesRelais, @unchecked Sendable {
     }
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
-        guard chemin == "/maison/structure", let s = structure else { return (404, Data()) }
-        return (200, Data(s.enTexte().utf8))
+        let reponse = chemin == "/maison/structure" ? structure : chemin == "/maison/console" ? console : nil
+        guard let reponse else { return (404, Data()) }
+        return (200, Data(reponse.enTexte().utf8))
     }
 }
 
@@ -173,6 +181,7 @@ struct ClientRelaisTests {
         #expect(types == ["get_states", "subscribe_events", "assist_pipeline/pipeline/list"])
         #expect(await l.messages().map { $0["id"]?.entier } == [1, 2, 3])
         #expect(await b.client.structure.vide, "relais sans /maison/structure : la maison reste en liste")
+        #expect(await b.client.console.vide, "relais sans /maison/console : pas de roue")
         #expect(await b.client.pipelinePrefere == "p-alfred")
         #expect(await b.client.maison["light.a"]?.etat == "off")
         #expect(
@@ -350,6 +359,32 @@ struct ClientRelaisTests {
         )
         try await attendre("pièce confirmée") {
             await b.nouvelles().contains(.commande(cle: "piece:salon", .confirmee))
+        }
+        await b.client.arreter()
+    }
+
+    @Test("Roue de la console : lue après la structure, puis annoncée ; une lumière de la roue se confirme")
+    func console() async throws {
+        let b = await Self.banc()
+        defer { b.ecoute.cancel() }
+        b.fabrique.console = [
+            "version": 1, "pieces": [["nom": "SALON", "etage": "rdc", "lumiere": "light.salon"]], "autres": [],
+            "jauges": [], "meteo": "weather.maison", "puissance": nil,
+        ]
+        try await b.connecter(etats: [["entity_id": "light.salon", "state": "off", "attributes": [:]]])
+        #expect(await b.client.console.pieces.map(\.nom) == ["SALON"])
+        #expect(await b.nouvelles().contains(.consoleChargee))
+        let t = Task { await b.client.basculer(lumiere: "light.salon") }
+        let appel = try await b.envoye("call_service")
+        #expect(appel["service"] == "turn_on" && appel["target"]?["entity_id"] == "light.salon")
+        try await b.repondre(appel)
+        await t.value
+        let l = try await b.liaison()
+        await l.pousser(
+            #"{"id":2,"type":"event","event":{"event_type":"state_changed","data":{"entity_id":"light.salon","new_state":{"entity_id":"light.salon","state":"on","attributes":{}}}}}"#
+        )
+        try await attendre("lumière confirmée") {
+            await b.nouvelles().contains(.commande(cle: "light.salon", .confirmee))
         }
         await b.client.arreter()
     }

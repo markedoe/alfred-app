@@ -19,9 +19,9 @@ struct AlfredApp: App {
             Racine()
                 .environment(alfred)
                 .environment(alfred.conversation)
-                .tint(Color(.champagne))
-                // tests d'interface : forcer le mode sombre (« -sombre »)
-                .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-sombre") ? .dark : nil)
+                .tint(Color(.faisceau))
+                // sombre seulement, comme la console
+                .preferredColorScheme(.dark)
                 .environment(\.animationsCoupees, Self.sansAnimations)
                 .transaction { t in
                     if Self.sansAnimations {
@@ -46,31 +46,10 @@ struct Racine: View {
             switch alfred.etape {
             case .configuration: ConfigurationVue()
             case .accueil: AccueilVue()
-            case .connecte: Principale()
+            case .connecte: ConsoleVue()
             }
         }
         .animation(.smooth, value: alfred.etape)
-    }
-}
-
-/// Les deux onglets : parler à Alfred, la maison.
-struct Principale: View {
-    @State private var onglet = Onglet.alfred
-
-    enum Onglet: Hashable {
-        case alfred, maison
-    }
-
-    var body: some View {
-        TabView(selection: $onglet) {
-            Tab("Alfred", systemImage: "waveform", value: .alfred) {
-                ParlerVue()
-            }
-            Tab("Maison", systemImage: "house", value: .maison) {
-                MaisonVue()
-            }
-        }
-        .tabBarMinimizeBehavior(.onScrollDown)
     }
 }
 

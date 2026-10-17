@@ -53,6 +53,8 @@ public actor ClientRelais {
         case entite(String, EtatEntite?)
         case tour(AutomateTour.Signal)
         case structureChargee
+        /// La roue, les jauges et la météo de la console (`GET /maison/console`).
+        case consoleChargee
         case commande(cle: String, IssueCommande)
     }
 
@@ -73,6 +75,7 @@ public actor ClientRelais {
     public private(set) var maison = Maison()
     /// Étages et pièces ; vide si le relais ne permet pas la lecture des registres (la maison reste en liste).
     public private(set) var structure = StructureMaison()
+    public private(set) var console = ConsoleMaison()
     /// Le pipeline préféré de HA (« Alfred ») ; nil = celui de HA par défaut.
     public private(set) var pipelinePrefere: String?
     public private(set) var tour = AutomateTour()
@@ -200,6 +203,8 @@ public actor ClientRelais {
             envoyer(["type": "subscribe_events", "event_type": "state_changed"])
             structure = await lireStructure()
             annonce.yield(.structureChargee)
+            console = await lireConsole()
+            annonce.yield(.consoleChargee)
             // prêt seulement quand le pipeline est connu : un tour lancé avant partirait sur un autre pipeline
             let p = try await demander(["type": "assist_pipeline/pipeline/list"])
             pipelinePrefere = p.succes ? p.valeur?["preferred_pipeline"]?.texte : nil
@@ -218,6 +223,15 @@ public actor ClientRelais {
             let s = StructureMaison.lire(v)
         else { return StructureMaison() }
         return s
+    }
+
+    /// `GET /maison/console` ; un relais sans cette route laisse la roue vide (l'app montre alors les pièces de HA).
+    private func lireConsole() async -> ConsoleMaison {
+        guard let (statut, corps) = try? await acces.lire("/maison/console"), statut == 200,
+            let v = try? JSONDecoder().decode(ValeurJSON.self, from: corps),
+            let c = ConsoleMaison.lire(v)
+        else { return ConsoleMaison() }
+        return c
     }
 
     // MARK: - envoi
