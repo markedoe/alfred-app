@@ -2,51 +2,78 @@ import AlfredKit
 import SwiftUI
 
 /// Le panneau « Assistant personnel » de la console : ce qu'Alfred fait, le résumé de la maison, et les échanges.
+/// Comme la console, seuls les échanges défilent ; aux tailles de texte d'accessibilité, tout le panneau défile (le
+/// titre et le résumé ne sont jamais coupés).
 struct PanneauAlfred: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
+    @Environment(\.dynamicTypeSize) private var tailleTexte
 
     var body: some View {
         PanneauVerre(phase: conversation.phase) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Assistant personnel").titreSection()
-                    .padding(.bottom, 16)
-                Text(briefing)
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(Color(.glace))
-                    .padding(.bottom, 12)
-                    .contentTransition(.opacity)
-                    .accessibilityIdentifier("briefing")
-                Text(alfred.resume)
-                    .font(.subheadline)
-                    .foregroundStyle(Color(.texteSecondaire))
-                    .lineSpacing(4)
-                    .padding(.bottom, 20)
-                    .accessibilityIdentifier("resume")
-                Rectangle().fill(Color(.trait)).frame(height: 1).padding(.bottom, 20).accessibilityHidden(true)
-                HStack(spacing: 12) {
-                    Text("Échanges").titreSection()
-                    if !conversation.vide {
-                        Button {
-                            Task { await conversation.nouvelle() }
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(Color(.glace))
-                                .frame(width: 44, height: 44)
-                                .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Nouvelle conversation")
-                        .accessibilityIdentifier("nouvelle")
+            if tailleTexte.isAccessibilitySize {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        entete
+                        Echanges()
                     }
                 }
-                .frame(minHeight: 44)
-                .padding(.bottom, 8)
-                Journal()
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .scrollEdgeEffectHidden(true, for: .all)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    entete
+                    ScrollView {
+                        Echanges()
+                    }
+                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                    .scrollEdgeEffectHidden(true, for: .all)
+                    .accessibilityIdentifier("journal")
+                }
             }
         }
         .animation(.smooth(duration: 0.25), value: briefing)
+    }
+
+    private var entete: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Assistant personnel").titreSection()
+                .padding(.bottom, 16)
+            Text(briefing)
+                .font(.title.weight(.bold))
+                .foregroundStyle(Color(.glace))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 12)
+                .contentTransition(.opacity)
+                .accessibilityIdentifier("briefing")
+            Text(alfred.resume)
+                .font(.subheadline)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 20)
+                .accessibilityIdentifier("resume")
+            Rectangle().fill(Color(.trait)).frame(height: 1).padding(.bottom, 20).accessibilityHidden(true)
+            HStack(spacing: 12) {
+                Text("Échanges").titreSection()
+                if !conversation.vide {
+                    Button {
+                        Task { await conversation.nouvelle() }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(Color(.glace))
+                            .frame(width: 44, height: 44)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Nouvelle conversation")
+                    .accessibilityIdentifier("nouvelle")
+                }
+            }
+            .frame(minHeight: 44)
+            .padding(.bottom, 8)
+        }
     }
 
     /// Comme la console : « À votre service. », l'action en cours, ou une action qui demande votre attention.
@@ -62,33 +89,29 @@ struct PanneauAlfred: View {
     }
 }
 
-/// Les échanges : VOUS (sarcelle) et ALFRED (champagne), ce qu'il a fait, en suivant la dernière réponse.
-private struct Journal: View {
+/// Les échanges : VOUS (sarcelle) et ALFRED (champagne), ce qu'il a fait ; le panneau suit la dernière réponse.
+private struct Echanges: View {
     @Environment(Conversation.self) private var conversation
 
     var body: some View {
-        ScrollView {
-            if conversation.vide {
-                Text("Votre conversation apparaîtra ici. Touchez « Parler » ou écrivez à Alfred.")
-                    .font(.callout)
-                    .foregroundStyle(Color(.texteSecondaire))
-                    .lineSpacing(5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 3)
-            } else {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(conversation.messages) { m in
-                        MessageConsole(message: m, dernier: m.id == conversation.messages.last?.id)
-                            .id(m.id)
-                    }
+        if conversation.vide {
+            Text("Votre conversation apparaîtra ici. Touchez « Parler » ou écrivez à Alfred.")
+                .font(.callout)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 3)
+        } else {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                ForEach(conversation.messages) { m in
+                    MessageConsole(message: m, dernier: m.id == conversation.messages.last?.id)
+                        .id(m.id)
                 }
-                .padding(3)
-                .scrollTargetLayout()
             }
+            .padding(3)
+            .scrollTargetLayout()
         }
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        .scrollIndicators(.automatic)
-        .accessibilityIdentifier("journal")
     }
 }
 
@@ -174,7 +197,10 @@ private struct Outils: View {
 struct PanneauEnvironnement: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
-    @ScaledMetric(relativeTo: .largeTitle) private var tailleTemperature: CGFloat = 46
+    @ScaledMetric(relativeTo: .subheadline) private var colonneHumidite: CGFloat = 40
+    /// 46 pt comme la console, avec la taille du texte, plafonnée (« 14.5°C » tient sur une ligne).
+    @ScaledMetric(relativeTo: .largeTitle) private var tailleMesuree: CGFloat = 46
+    private var tailleTemperature: CGFloat { min(tailleMesuree, 72) }
 
     var body: some View {
         PanneauVerre(phase: conversation.phase) {
@@ -197,6 +223,7 @@ struct PanneauEnvironnement: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.automatic)
+            .scrollEdgeEffectHidden(true, for: .all)
         }
         .accessibilityIdentifier("environnement")
     }
@@ -209,6 +236,7 @@ struct PanneauEnvironnement: View {
                 .font(.system(size: tailleTemperature, weight: .semibold, design: .monospaced))
                 .tracking(-2)
                 .foregroundStyle(Color(.glace))
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Température extérieure")
                 .accessibilityValue(Format.valeur(a["temperature"]?.nombre, " degrés", 1))
             Text(Format.meteo(m.etat))
@@ -259,9 +287,9 @@ struct PanneauEnvironnement: View {
         if pieces.isEmpty {
             Text("Aucune mesure").font(.subheadline).foregroundStyle(Color(.texteSecondaire))
         } else {
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 16) {
+            VStack(spacing: 4) {
                 ForEach(pieces) { p in
-                    GridRow {
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(p.nom).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.texte))
                             Text(p.etage).font(.caption).foregroundStyle(Color(.texteSecondaire))
@@ -270,12 +298,12 @@ struct PanneauEnvironnement: View {
                         Text(Format.valeur(p.temperature, "°", 1))
                             .font(.subheadline.weight(.semibold).monospaced())
                             .foregroundStyle(Color(.texte))
-                            .gridColumnAlignment(.trailing)
                         Text(Format.valeur(p.humidite, "%"))
                             .font(.subheadline.weight(.semibold).monospaced())
                             .foregroundStyle(Color(.texteSecondaire))
-                            .gridColumnAlignment(.trailing)
+                            .frame(minWidth: colonneHumidite, alignment: .trailing)
                     }
+                    .frame(minHeight: 44)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(p.nom.capitalized)
                     .accessibilityValue(

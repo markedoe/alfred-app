@@ -344,9 +344,10 @@ private struct Etiquette: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
+            // la console : #b3cbdc ; un peu plus clair ici, l'audit d'Apple jugeant ces petits chiffres trop pâles
             Text(Format.valeur(secteur.temperature?.valeur, "°", 1))
                 .font(.system(size: fs, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color(red: 179 / 255, green: 203 / 255, blue: 220 / 255))
+                .foregroundStyle(Color(red: 214 / 255, green: 228 / 255, blue: 238 / 255))
         }
         .frame(width: largeur)
         .position(x: x, y: y)

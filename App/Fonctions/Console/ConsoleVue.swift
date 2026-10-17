@@ -48,7 +48,8 @@ struct ConsoleVue: View {
                 }
                 .ignoresSafeArea(.keyboard)
                 if ecrire {
-                    SaisieConsole(ouverte: $ecrire)
+                    // comme la console : la saisie se ferme à l'envoi, et le téléphone montre les échanges
+                    SaisieConsole(ouverte: $ecrire) { if !large { vue = .alfred } }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                         .frame(maxWidth: large ? 640 : .infinity)
@@ -243,6 +244,8 @@ private struct Lien: View {
                 }
             }
         }
+        .frame(minHeight: 44)
+        .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Lien avec la maison")
         .accessibilityValue(mot)
@@ -264,50 +267,61 @@ private struct Lien: View {
 // MARK: - navigation (téléphone)
 
 /// Les trois vues de la console sur téléphone : capitales espacées, la vue choisie en champagne, soulignée du faisceau.
+/// Comme la console, « Environnement » a 1,4 fois la place des deux autres. Le texte garde la taille de la console,
+/// comme une barre d'onglets du système ; un appui long le montre en grand (visionneuse de grand contenu).
 struct NavConsole: View {
     @Binding var vue: ConsoleVue.VueConsole
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(ConsoleVue.VueConsole.allCases, id: \.self) { v in
-                Button {
-                    vue = v
-                } label: {
-                    Text(v.titre)
-                        .font(.caption2.weight(.heavy))
-                        .tracking(1.8)
-                        .textCase(.uppercase)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .foregroundStyle(vue == v ? Color(.champagne) : Color(.texteSecondaire))
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .overlay(alignment: .top) {
-                            if vue == v {
-                                GeometryReader { g in
-                                    Rectangle()
-                                        .fill(Color(.faisceau))
-                                        .frame(width: g.size.width * 0.52, height: 2)
-                                        .shadow(color: Color(.faisceau).opacity(0.55), radius: 5)
-                                        .frame(maxWidth: .infinity)
-                                        .offset(y: -6)
-                                }
-                            }
-                        }
-                        .contentShape(.rect)
+        GeometryReader { g in
+            let unite = (g.size.width - 16) / 3.4
+            HStack(spacing: 8) {
+                ForEach(ConsoleVue.VueConsole.allCases, id: \.self) { v in
+                    bouton(v)
+                        .frame(width: unite * (v == .environnement ? 1.4 : 1))
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(vue == v ? .isSelected : [])
-                .accessibilityIdentifier("onglet-\(v)")
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(height: 50)
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .padding(.horizontal, 12)
         .padding(.top, 6)
-        .background(Console.bandeau.ignoresSafeArea(edges: .bottom))
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color(.trait)).frame(height: 1.5).accessibilityHidden(true)
+        .background(alignment: .top) {
+            ZStack(alignment: .top) {
+                Console.bandeau.ignoresSafeArea(edges: .bottom)
+                Rectangle().fill(Color(.trait)).frame(height: 1.5)
+            }
+            .accessibilityHidden(true)
         }
         .animation(.smooth(duration: 0.2), value: vue)
+    }
+
+    private func bouton(_ v: ConsoleVue.VueConsole) -> some View {
+        Button {
+            vue = v
+        } label: {
+            Text(v.titre)
+                .font(.caption2.weight(.heavy))
+                .tracking(1.6)
+                .textCase(.uppercase)
+                .foregroundStyle(vue == v ? Color(.champagne) : Color(.texteSecondaire))
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .overlay(alignment: .top) {
+                    if vue == v {
+                        Rectangle()
+                            .fill(Color(.faisceau))
+                            .frame(height: 2)
+                            .shadow(color: Color(.faisceau).opacity(0.55), radius: 5)
+                            .padding(.horizontal, 24)
+                            .offset(y: -6)
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityShowsLargeContentViewer()
+        .accessibilityAddTraits(vue == v ? .isSelected : [])
+        .accessibilityIdentifier("onglet-\(v)")
     }
 }
 
@@ -444,7 +458,7 @@ private struct Jauges: View {
     @Environment(Alfred.self) private var alfred
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             ForEach(alfred.console.jauges) { j in
                 let v = alfred.maison[j.entite]?.nombre
                 HStack(spacing: 6) {
@@ -457,14 +471,16 @@ private struct Jauges: View {
                             .rotationEffect(.degrees(-90))
                             .shadow(color: Color(.sarcelle).opacity(0.6), radius: 4)
                     }
-                    .frame(width: 32, height: 32)
+                    .frame(width: 30, height: 30)
                     .padding(1)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(j.libelle).etiquette(Color(.texteSecondaire), espacement: 0.6)
+                        Text(j.libelle).etiquette(Color(.texteSecondaire), espacement: 0.4)
                         Text(Format.valeur(v, j.unite, j.decimalesBandeau))
                             .font(.footnote.weight(.semibold).monospaced())
                             .foregroundStyle(Color(.texte))
                     }
+                    .lineLimit(1)
+                    .fixedSize()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .ignore)
@@ -472,7 +488,8 @@ private struct Jauges: View {
                 .accessibilityValue(Format.valeur(v, " " + j.unite, j.decimalesBandeau))
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+        // des instruments, à la taille de la console ; les mêmes valeurs suivent le texte dans Environnement
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .animation(.smooth, value: alfred.console.jauges.map { alfred.maison[$0.entite]?.etat })
     }
 }
@@ -540,6 +557,7 @@ struct SaisieConsole: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
     @Binding var ouverte: Bool
+    let envoye: () -> Void
     @State private var texte = ""
     @FocusState private var focus: Bool
 
@@ -584,6 +602,8 @@ struct SaisieConsole: View {
         guard !t.isEmpty, alfred.estPret else { return }
         texte = ""
         Task { await conversation.ecrire(t) }
+        ouverte = false
+        envoye()
     }
 }
 

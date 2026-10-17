@@ -29,9 +29,10 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [actif], timeout: 10), .completed, "la démo ne devient pas prête")
     }
 
-    /// Un élément dont le libellé d'accessibilité contient ce texte (les messages regroupent leurs textes).
+    /// Un élément dont le libellé d'accessibilité contient ce texte, sans tenir compte de la casse : les titres de la
+    /// console sont en capitales (« EXTÉRIEUR »), et les messages regroupent leurs textes.
     private func element(_ app: XCUIApplication, contenant texte: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", texte)).firstMatch
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", texte)).firstMatch
     }
 
     private func bouton(_ app: XCUIApplication, _ identifiant: String) -> XCUIElement {
@@ -62,7 +63,8 @@ final class ParcoursUITests: XCTestCase {
         saisie.typeText("Allume la cuisine")
         // par l'identifiant seul : la touche « envoyer » du clavier français porte le même libellé
         bouton(app, "envoyer").tap()
-        vue(app, "alfred")
+        // comme la console : l'envoi ferme la saisie et montre les échanges
+        XCTAssertTrue(app.staticTexts["briefing"].waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, contenant: "Allumer · Cuisine, fait").waitForExistence(timeout: 10))
         XCTAssertTrue(
             element(app, contenant: "C’est fait : j’ai allumé la pièce Cuisine.").waitForExistence(timeout: 10))

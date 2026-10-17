@@ -531,7 +531,7 @@ private struct TexteNoyau: View {
         }
         .lineLimit(1)
         .minimumScaleFactor(0.6)
-        .frame(width: rc * 1.8)
+        .frame(width: rc * 1.8, height: rc * 1.8)
     }
 
     private var libelle: String? {

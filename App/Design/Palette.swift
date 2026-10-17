@@ -72,8 +72,11 @@ private struct TitreSection: ViewModifier {
                 .tracking(1.6)
                 .textCase(.uppercase)
                 .foregroundStyle(Color(.champagne))
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
             LinearGradient(colors: [Color(.trait), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(minWidth: 24, maxWidth: .infinity)
                 .frame(height: 2)
                 .accessibilityHidden(true)
         }
