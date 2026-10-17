@@ -1,11 +1,18 @@
 # Fabrication signée et envoi à TestFlight (testeurs internes : la famille). Lancement à la main, ou par une étiquette
 # de version (v1.0.0…). Il lit la configuration de la maison (adresse du relais, autorité épinglée, hôte de la page de
-# connexion) et la clé d'API App Store Connect ; le workflow « Certificats » (inventaire en lecture seule) ne lit que
-# cette clé. Signature automatique gérée par Apple (certificats « cloud ») : aucun certificat ni profil n'est stocké.
+# connexion), la clé d'API App Store Connect et l'identité de signature de la CI ; le workflow « Certificats » ne lit
+# que la clé. Signature automatique : l'archive est signée par le certificat de développement unique de la CI (secrets
+# du dépôt, trousseau temporaire ; sans lui, chaque machine neuve en créerait un), la distribution par Apple (« cloud ») ;
+# les profils sont gérés par Xcode. « envoyer » décoché : archive et export signés, sans envoi (vérifier la signature).
 name: TestFlight
 
 on:
   workflow_dispatch:
+    inputs:
+      envoyer:
+        description: "Envoyer à TestFlight (décoché : archive et export signés seulement)"
+        type: boolean
+        default: true
   push:
     tags: ["v*"]
 
@@ -48,6 +55,11 @@ jobs:
           ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
         run: scripts/cle-asc.sh
+      - name: Identité de signature de la CI (trousseau temporaire)
+        env:
+          SIGNATURE_P12_B64: ${{ secrets.SIGNATURE_P12_B64 }}
+          SIGNATURE_P12_MOT_DE_PASSE: ${{ secrets.SIGNATURE_P12_MOT_DE_PASSE }}
+        run: scripts/trousseau.sh
       - name: Archive (Release, signature automatique)
         env:
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
@@ -67,6 +79,8 @@ jobs:
             ALFRED_BUILD="${{ github.run_number }}" 2>&1 | tee "$RUNNER_TEMP/archive.log"
       - name: Envoi à TestFlight
         env:
+          # sur une étiquette, « inputs » est vide : l'envoi a lieu (null != false vaut faux dans les expressions)
+          ENVOYER: ${{ github.event_name != 'workflow_dispatch' || inputs.envoyer }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
           ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
           APPLE_EQUIPE_ID: ${{ secrets.APPLE_EQUIPE_ID }}
@@ -74,7 +88,8 @@ jobs:
           set -o pipefail
           plutil -create xml1 "$RUNNER_TEMP/export.plist"
           plutil -insert method -string app-store-connect "$RUNNER_TEMP/export.plist"
-          plutil -insert destination -string upload "$RUNNER_TEMP/export.plist"
+          if [[ "$ENVOYER" == true ]]; then destination=upload; else destination=export; fi
+          plutil -insert destination -string "$destination" "$RUNNER_TEMP/export.plist"
           plutil -insert teamID -string "$APPLE_EQUIPE_ID" "$RUNNER_TEMP/export.plist"
           plutil -insert signingStyle -string automatic "$RUNNER_TEMP/export.plist"
           plutil -insert uploadSymbols -bool true "$RUNNER_TEMP/export.plist"
@@ -87,6 +102,8 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" \
             -authenticationKeyID "$ASC_CLE_ID" \
             -authenticationKeyIssuerID "$ASC_EMETTEUR_ID" 2>&1 | tee "$RUNNER_TEMP/export.log"
-      - name: Effacer la clé
+      - name: Effacer la clé et le trousseau
         if: always()
-        run: rm -rf "$RUNNER_TEMP/asc"
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/signature.p12"
+          if [[ -f "$RUNNER_TEMP/signature.keychain-db" ]]; then security delete-keychain "$RUNNER_TEMP/signature.keychain-db"; fi
