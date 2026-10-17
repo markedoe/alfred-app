@@ -106,6 +106,11 @@ public struct VueEtage: Sendable, Equatable, Identifiable {
     public let etage: StructureMaison.Etage?
     public let pieces: [VuePiece]
     public var id: String { etage?.id ?? "_sans_etage" }
+
+    public init(etage: StructureMaison.Etage?, pieces: [VuePiece]) {
+        self.etage = etage
+        self.pieces = pieces
+    }
 }
 
 extension EtatEntite {

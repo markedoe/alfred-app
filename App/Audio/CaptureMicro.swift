@@ -65,18 +65,7 @@ final class CaptureMicro: @unchecked Sendable {
         let rapport = Self.format.sampleRate / tampon.format.sampleRate
         let capacite = AVAudioFrameCount((Double(tampon.frameLength) * rapport).rounded(.up)) + 32
         guard let sortie = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: capacite) else { return nil }
-        var fourni = false
-        var erreur: NSError?
-        let statut = conv.convert(to: sortie, error: &erreur) { _, etat in
-            if fourni {
-                etat.pointee = .noDataNow
-                return nil
-            }
-            fourni = true
-            etat.pointee = .haveData
-            return tampon
-        }
-        guard statut != .error, let canal = sortie.floatChannelData?[0], sortie.frameLength > 0 else { return nil }
+        guard conv.convertirUneFois(tampon, vers: sortie), let canal = sortie.floatChannelData?[0] else { return nil }
         return Array(UnsafeBufferPointer(start: canal, count: Int(sortie.frameLength)))
     }
 }

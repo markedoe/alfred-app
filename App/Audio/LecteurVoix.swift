@@ -165,18 +165,7 @@ final class LecteurVoix: @unchecked Sendable {
         capacite: AVAudioFrameCount
     ) -> AVAudioPCMBuffer? {
         guard let pcm = AVAudioPCMBuffer(pcmFormat: sortie, frameCapacity: max(capacite, 1)) else { return nil }
-        var fourni = false
-        var erreur: NSError?
-        let statut = conv.convert(to: pcm, error: &erreur) { _, etat in
-            if fourni {
-                etat.pointee = .noDataNow
-                return nil
-            }
-            fourni = true
-            etat.pointee = .haveData
-            return entree
-        }
-        return statut != .error && pcm.frameLength > 0 ? pcm : nil
+        return conv.convertirUneFois(entree, vers: pcm) ? pcm : nil
     }
 
     private func programmer(_ pcm: AVAudioPCMBuffer) {
