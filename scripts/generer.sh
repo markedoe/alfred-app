@@ -22,8 +22,11 @@ if [[ -n "${ALFRED_RELAIS:-}" ]]; then
     if [[ -n "${ALFRED_AUTORITE_PEM_B64:-}" ]]; then
         tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
         printf '%s' "$ALFRED_AUTORITE_PEM_B64" | base64 --decode > "$tmp/ca.pem"
-        # une AUTORITÉ, pas un certificat de serveur : l'app ne fait confiance qu'à elle pour ce relais
-        openssl x509 -in "$tmp/ca.pem" -noout -ext basicConstraints 2>/dev/null | grep -q "CA:TRUE" \
+        # une AUTORITÉ, pas un certificat de serveur : l'app ne fait confiance qu'à elle pour ce relais.
+        # « -text » est compris par OpenSSL comme par LibreSSL (l'openssl de macOS, sans « -ext ») ; lu dans une
+        # variable, pas par un tube : « grep -q » couperait openssl, et pipefail ferait échouer le test
+        details=$(openssl x509 -in "$tmp/ca.pem" -noout -text)
+        [[ "$details" == *"CA:TRUE"* ]] \
             || { echo "ALFRED_AUTORITE_PEM_B64 : ce n'est pas un certificat d'autorité" >&2; exit 1; }
         openssl x509 -in "$tmp/ca.pem" -outform der -out "$tmp/ca.der"
         plutil -insert Autorite -data "$(base64 < "$tmp/ca.der" | tr -d '\n')" "$CONFIG"
