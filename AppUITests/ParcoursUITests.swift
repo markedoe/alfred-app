@@ -36,7 +36,8 @@ final class ParcoursUITests: XCTestCase {
         capturer(app, "1-accueil-alfred")
         saisie.tap()
         saisie.typeText("Allume la cuisine")
-        app.buttons["envoyer"].tap()
+        // par l'identifiant seul : la touche « envoyer » du clavier français porte le même libellé
+        app.buttons.matching(NSPredicate(format: "identifier == %@", "envoyer")).firstMatch.tap()
         XCTAssertTrue(element(app, contenant: "Allumer · Cuisine, fait").waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, contenant: "C’est fait : cuisine allumé.").waitForExistence(timeout: 10))
         capturer(app, "2-conversation")
@@ -64,14 +65,28 @@ final class ParcoursUITests: XCTestCase {
         try auditer(lancer(sombre: true))
     }
 
+    /// Les trois écrans, chacun audité en entier : tous les problèmes sont listés dans UN échec, avec l'écran,
+    /// le type de problème et l'élément (sinon le test s'arrêterait au premier).
     private func auditer(_ app: XCUIApplication) throws {
+        var problemes: [String] = []
+        func auditerEcran(_ ecran: String) throws {
+            try app.performAccessibilityAudit { probleme in
+                let element = probleme.element.map { "« \($0.label) » (\($0.identifier))" } ?? "sans élément"
+                problemes.append(
+                    "\(ecran) · \(probleme.compactDescription) · \(element) · \(probleme.detailedDescription)")
+                return true
+            }
+        }
         XCTAssertTrue(app.buttons["noyau"].waitForExistence(timeout: 10))
-        try app.performAccessibilityAudit()
+        try auditerEcran("Alfred")
         app.tabBars.buttons["Maison"].tap()
         XCTAssertTrue(app.buttons["Salon"].waitForExistence(timeout: 10))
-        try app.performAccessibilityAudit()
+        try auditerEcran("Maison")
         app.buttons["reglages"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Réglages"].waitForExistence(timeout: 5))
-        try app.performAccessibilityAudit()
+        try auditerEcran("Réglages")
+        capturer(app, "audit-reglages")
+        XCTAssertTrue(
+            problemes.isEmpty, "\(problemes.count) problème(s) d'accessibilité :\n" + problemes.joined(separator: "\n"))
     }
 }

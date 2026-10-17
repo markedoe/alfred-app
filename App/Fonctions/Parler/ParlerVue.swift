@@ -7,16 +7,18 @@ struct ParlerVue: View {
     @Environment(Conversation.self) private var conversation
     @State private var texte = ""
     @State private var reglages = false
+    @State private var hauteurVisible: CGFloat = 0
     @FocusState private var saisie: Bool
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 if conversation.vide {
+                    // centré dans la partie visible quand il y tient ; sinon (grandes tailles de texte), il défile
                     Bienvenue { suggestion in
                         Task { await conversation.ecrire(suggestion) }
                     }
-                    .containerRelativeFrame(.vertical, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: hauteurVisible)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         ForEach(conversation.messages) { message in
@@ -24,10 +26,16 @@ struct ParlerVue: View {
                                 .id(message.id)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
                     .scrollTargetLayout()
                 }
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { g in
+                g.containerSize.height - g.contentInsets.top - g.contentInsets.bottom
+            } action: { _, hauteur in
+                hauteurVisible = max(hauteur, 0)
             }
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollDismissesKeyboard(.interactively)
@@ -89,6 +97,7 @@ private struct Bienvenue: View {
                 ForEach(Self.suggestions, id: \.self) { s in
                     Button(s) { suggerer(s) }
                         .buttonStyle(.glass)
+                        .controlSize(.large)
                         .disabled(!estPret)
                 }
             }

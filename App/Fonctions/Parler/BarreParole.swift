@@ -34,9 +34,11 @@ struct BarreParole: View {
                                 Image(systemName: "arrow.up.circle.fill")
                                     .font(.title)
                                     .foregroundStyle(Color(.champagne))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(.circle)
                             }
-                            .padding(.bottom, 8)
-                            .padding(.trailing, 8)
+                            .padding(.bottom, 4)
+                            .padding(.trailing, 4)
                             .accessibilityLabel("Envoyer")
                             .accessibilityIdentifier("envoyer")
                             .transition(.scale.combined(with: .opacity))
