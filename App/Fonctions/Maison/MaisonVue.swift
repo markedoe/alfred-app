@@ -7,8 +7,14 @@ struct MaisonVue: View {
     @Environment(Alfred.self) private var alfred
     @State private var recherche = ""
     @State private var reglages = false
+    @Environment(\.dynamicTypeSize) private var tailleTexte
 
-    private let colonnes = [GridItem(.adaptive(minimum: 158), spacing: 12)]
+    /// Deux colonnes (ou plus) ; une seule aux tailles de texte d'accessibilité, où deux colonnes coupaient les noms
+    /// de pièce et les températures au milieu (« Bu-reau », « 20. / 9° »).
+    private var colonnes: [GridItem] {
+        tailleTexte.isAccessibilitySize
+            ? [GridItem(.flexible(), spacing: 12)] : [GridItem(.adaptive(minimum: 158), spacing: 12)]
+    }
 
     var body: some View {
         NavigationStack {
@@ -116,13 +122,15 @@ private struct Resume: View {
 struct TuilePiece: View {
     @Environment(Alfred.self) private var alfred
     let piece: VuePiece
+    /// La place de l'ampoule (même mesure que `BoutonAmpoule`).
+    @ScaledMetric(relativeTo: .title3) private var coteAmpoule: CGFloat = 44
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             NavigationLink(value: piece.id) {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
-                        Color.clear.frame(width: 44, height: 44)
+                        Color.clear.frame(width: coteAmpoule, height: coteAmpoule)
                         Spacer()
                         if let t = piece.temperature?.nombre {
                             Text(t.formatted(.number.precision(.fractionLength(1))) + "°")
@@ -193,6 +201,8 @@ struct BoutonAmpoule: View {
     let enCours: Bool
     let disponible: Bool
     let action: () -> Void
+    /// 44 pt à la taille de texte par défaut ; le cercle grandit avec l'icône (sinon elle en déborde en grand texte).
+    @ScaledMetric(relativeTo: .title3) private var cote: CGFloat = 44
 
     var body: some View {
         Button(action: action) {
@@ -207,8 +217,7 @@ struct BoutonAmpoule: View {
                         .contentTransition(.symbolEffect(.replace))
                 }
             }
-            .frame(width: 44, height: 44)
-            .shadow(color: allumee ? Color(.champagne).opacity(0.5) : .clear, radius: 10)
+            .frame(width: cote, height: cote)
         }
         .buttonStyle(.plain)
         .disabled(!disponible || enCours)

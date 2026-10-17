@@ -96,8 +96,7 @@ private struct Bienvenue: View {
             VStack(spacing: 10) {
                 ForEach(Self.suggestions, id: \.self) { s in
                     Button(s) { suggerer(s) }
-                        .buttonStyle(.glass)
-                        .controlSize(.large)
+                        .buttonStyle(StyleSuggestion())
                         .disabled(!estPret)
                 }
             }

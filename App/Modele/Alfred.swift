@@ -33,7 +33,8 @@ final class Alfred {
     /// Raison de la dernière déconnexion forcée (session expirée, refusée par la maison).
     private(set) var motifAccueil: String?
     let conversation: Conversation
-    let demo: Bool
+    /// La maison de démonstration (tests d'interface, ou choisie à l'accueil pour découvrir l'app hors de la maison).
+    private(set) var demo: Bool
 
     @ObservationIgnored private var client: ClientRelais?
     @ObservationIgnored private var acces: AccesURLSession?
@@ -117,6 +118,24 @@ final class Alfred {
                 await self.traiter(n, client: client, voix: voix)
             }
         }
+    }
+
+    /// La démonstration, choisie à l'accueil : une maison simulée, sans réseau ni micro. Rien n'est envoyé ni gardé.
+    func essayerDemo() {
+        guard !demo, client == nil else { return }
+        demo = true
+        motifAccueil = nil
+        etape = .connecte
+        demarrer(acces: AccesDemo(), voix: nil)
+    }
+
+    /// Quitter la démonstration : retour à l'accueil (ou à la configuration).
+    func quitterDemo() async {
+        guard demo else { return }
+        await conversation.nouvelle()
+        await fermer()
+        demo = false
+        etape = configuration == nil ? .configuration : .accueil
     }
 
     /// Se déconnecter : le jeton est supprimé dans HA (route du relais), la session quitte le trousseau.

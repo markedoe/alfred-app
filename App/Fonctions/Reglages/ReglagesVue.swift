@@ -13,11 +13,18 @@ struct ReglagesVue: View {
             Form {
                 Section {
                     LabeledContent("Connecté en tant que") { Valeur(alfred.moi?.nom ?? "—") }
-                    if let hote = alfred.configuration?.relais.hote {
+                    if !alfred.demo, let hote = alfred.configuration?.relais.hote {
                         LabeledContent("Maison") { Valeur(hote) }
                     }
-                    // la démo n'a pas de compte : rien à déconnecter
-                    if !alfred.demo {
+                    // la démo n'a pas de compte : on la quitte, rien à déconnecter
+                    if alfred.demo {
+                        Button("Quitter la démonstration") {
+                            Task {
+                                await alfred.quitterDemo()
+                                fermer()
+                            }
+                        }
+                    } else {
                         Button("Se déconnecter", role: .destructive) { confirmer = true }
                             .confirmationDialog(
                                 "Se déconnecter de la maison ?", isPresented: $confirmer, titleVisibility: .visible
@@ -48,14 +55,11 @@ struct ReglagesVue: View {
                     .foregroundStyle(Color(.texteSecondaire))
                 }
                 Section {
-                    Group {
-                        Label("Votre voix ne va que vers votre maison, jamais sur internet.", systemImage: "house")
-                        Label(
-                            "Le micro n’est ouvert que pendant une conversation ; il se ferme quand l’app passe en arrière-plan.",
-                            systemImage: "mic.slash")
-                        Label("La conversation n’est pas gardée sur cet iPhone.", systemImage: "trash")
-                    }
-                    .font(.subheadline)
+                    Engagement("Votre voix ne va que vers votre maison, jamais sur internet.", icone: "house")
+                    Engagement(
+                        "Le micro n’est ouvert que pendant une conversation ; il se ferme quand l’app passe en arrière-plan.",
+                        icone: "mic.slash")
+                    Engagement("La conversation n’est pas gardée sur cet iPhone.", icone: "trash")
                 } header: {
                     EnTete("Confidentialité")
                 }
@@ -68,6 +72,9 @@ struct ReglagesVue: View {
                     EnTete("À propos")
                 }
             }
+            // limite nette sous la barre : le fondu automatique estompait l'en-tête « Compte » (contraste 3,9:1
+            // mesuré), qui ne peut jamais en sortir puisqu'il est en haut
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .navigationTitle("Réglages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -84,6 +91,24 @@ struct ReglagesVue: View {
         let texte: LocalizedStringKey
         init(_ texte: LocalizedStringKey) { self.texte = texte }
         var body: some View { Text(texte).foregroundStyle(Color(.texteSecondaire)) }
+    }
+
+    /// Un engagement de confidentialité. Le texte prend toute la hauteur qu'il lui faut, à toutes les tailles.
+    private struct Engagement: View {
+        let texte: LocalizedStringKey
+        let icone: String
+        init(_ texte: LocalizedStringKey, icone: String) {
+            self.texte = texte
+            self.icone = icone
+        }
+        var body: some View {
+            Label {
+                Text(texte).fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: icone)
+            }
+            .font(.subheadline)
+        }
     }
 
     /// La valeur d'une ligne (même raison).

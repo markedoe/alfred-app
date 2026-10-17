@@ -30,6 +30,10 @@ struct ConfigurationVue: View {
                         Text("L’adresse du relais d’Alfred dans votre maison. Elle ne vous sera demandée qu’une fois.")
                     }
                 }
+                Section {
+                    BoutonDemo()
+                        .frame(maxWidth: .infinity)
+                }
             }
             .navigationTitle("Bienvenue")
             .toolbar {

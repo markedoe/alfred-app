@@ -105,3 +105,24 @@ extension View {
             AvisModificateur(avis: avis, texte: { $0.texte }, attention: { $0.genre == .attention }, oublier: oublier))
     }
 }
+
+/// Une suggestion de l'écran d'accueil : du contenu, donc sur une surface pleine et non sur verre (le Liquid Glass
+/// est réservé aux commandes qui flottent au-dessus du contenu). 44 pt de haut au moins.
+struct StyleSuggestion: ButtonStyle {
+    @Environment(\.isEnabled) private var actif
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color(.champagne))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 11)
+            .frame(minHeight: 44)
+            .background(Color(.surface), in: .capsule)
+            .overlay(Capsule().strokeBorder(Color(.trait).opacity(0.6), lineWidth: 0.5))
+            .contentShape(.capsule)
+            .opacity(actif ? 1 : 0.45)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.smooth(duration: 0.15), value: configuration.isPressed)
+    }
+}

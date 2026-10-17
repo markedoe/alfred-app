@@ -68,6 +68,7 @@ struct AccueilVue: View {
                 .font(.footnote)
                 .foregroundStyle(Color(.texteSecondaire))
                 .multilineTextAlignment(.center)
+                BoutonDemo()
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 8)
@@ -98,6 +99,19 @@ struct AccueilVue: View {
             }
             .accessibilityElement(children: .combine)
         }
+    }
+}
+
+/// Découvrir l'app sans être à la maison : une maison simulée, sans réseau ni micro.
+struct BoutonDemo: View {
+    @Environment(Alfred.self) private var alfred
+
+    var body: some View {
+        Button("Essayer avec une maison de démonstration") { alfred.essayerDemo() }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color(.champagne))
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("essayerDemo")
     }
 }
 

@@ -116,6 +116,8 @@ final class ParcoursUITests: XCTestCase {
             capturer(app, "grand-texte-4-reglages")
             app.swipeUp()
             capturer(app, "grand-texte-5-reglages-suite")
+            app.swipeUp()
+            capturer(app, "grand-texte-6-reglages-fin")
         }
         return h
     }
