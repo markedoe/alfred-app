@@ -3,6 +3,8 @@
 # jamais par ici, seule sa demande CSR). Lit la clé d'API App Store Connect ; n'affiche aucun nom (celui du titulaire
 # figure dans chaque certificat, et ce journal est public) : le certificat créé repart chiffré pour le destinataire
 # donné (CMS), jamais en clair dans un artefact.
+# Les entrées (demande, destinataire) s'affichent EN CLAIR dans le journal public, comme toute variable qui n'est pas un
+# secret : n'y passer que des clés publiques sous des noms neutres, jamais un certificat de la maison.
 name: Certificats
 
 on:

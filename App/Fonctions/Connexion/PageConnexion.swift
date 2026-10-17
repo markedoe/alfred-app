@@ -54,6 +54,8 @@ struct PageConnexion: UIViewRepresentable {
         private let confiance: ConfianceTLS
         private(set) var aEchoue = false
         private var termine = false
+        /// La dernière chaîne du relais refusée par l'épinglage (son code de Security), pour le message d'échec.
+        private var refus: ConfianceTLS.Decision?
 
         init(
             configuration: ConfigurationMaison, etat: Binding<EtatPage>,
@@ -67,6 +69,7 @@ struct PageConnexion: UIViewRepresentable {
 
         func charger(_ vue: WKWebView) {
             aEchoue = false
+            refus = nil
             var c = URLComponents(url: configuration.relais.connexion, resolvingAgainstBaseURL: false)!
             c.queryItems = [URLQueryItem(name: "retour", value: "/moi")]
             vue.load(URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
@@ -76,7 +79,13 @@ struct PageConnexion: UIViewRepresentable {
         func webView(_ vue: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
             guard let url = action.request.url, let schema = url.scheme?.lowercased() else { return .cancel }
             guard schema == "https" || schema == "http" else { return .cancel }  // aucune autre app ouverte d'ici
-            if url.host()?.caseInsensitiveCompare(configuration.relais.hote) == .orderedSame, url.path() == "/moi" {
+            let versRelais = url.host()?.caseInsensitiveCompare(configuration.relais.hote) == .orderedSame
+            // le relais en https seulement : son exception d'ATS (scripts/generer.sh) permettrait aussi http
+            if versRelais, schema != "https" {
+                echec("La maison a proposé une connexion non chiffrée. Connexion refusée par sécurité.")
+                return .cancel
+            }
+            if versRelais, url.path() == "/moi" {
                 await terminer(vue)
                 return .cancel
             }
@@ -108,11 +117,11 @@ struct PageConnexion: UIViewRepresentable {
         func webView(
             _ vue: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError erreur: any Error
         ) {
-            echec(Self.message(erreur))
+            echec(Self.message(erreur, refus: refus))
         }
 
         func webView(_ vue: WKWebView, didFail navigation: WKNavigation!, withError erreur: any Error) {
-            echec(Self.message(erreur))
+            echec(Self.message(erreur, refus: refus))
         }
 
         func webView(
@@ -120,7 +129,9 @@ struct PageConnexion: UIViewRepresentable {
         ) async
             -> (URLSession.AuthChallengeDisposition, URLCredential?)
         {
-            confiance.repondre(defi)
+            let decision = confiance.decider(defi)
+            if case .refuser = decision { refus = decision }
+            return ConfianceTLS.reponse(decision, a: defi)
         }
 
         private func echec(_ message: String) {
@@ -130,11 +141,21 @@ struct PageConnexion: UIViewRepresentable {
             etat.wrappedValue = .echec(message)
         }
 
-        /// Le message, suivi du code technique de l'erreur (« code -1202 ») : de quoi trouver la cause d'un coup.
-        static func message(_ erreur: any Error) -> String {
+        /// Le message, suivi des détails techniques : le code de l'erreur, l'hôte en cause et, si l'épinglage a refusé
+        /// la chaîne du relais, le code de Security (« code -999 · relais.maison.example · confiance -67602 ») ; de
+        /// quoi trouver la cause d'un coup.
+        static func message(_ erreur: any Error, refus: ConfianceTLS.Decision? = nil) -> String {
             let e = erreur as NSError
-            return texte(e) + " (\(e.domain == NSURLErrorDomain ? "code" : e.domain) \(e.code))"
+            var details = ["\(e.domain == NSURLErrorDomain ? "code" : e.domain) \(e.code)"]
+            if let hote = (e.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host() { details.append(hote) }
+            if case .refuser(let code) = refus { details.append("confiance " + (code.map(String.init) ?? "absente")) }
+            // un défi refusé par nous se termine en « annulé » (-999) : c'est un refus d'identité, pas une coupure
+            let refuseParNous = refus != nil && e.domain == NSURLErrorDomain && e.code == NSURLErrorCancelled
+            return (refuseParNous ? texteIdentite : texte(e)) + " (" + details.joined(separator: " · ") + ")"
         }
+
+        private static let texteIdentite =
+            "L’identité de la maison n’a pas pu être vérifiée. Connexion refusée par sécurité."
 
         private static func texte(_ e: NSError) -> String {
             if e.domain == NSURLErrorDomain {
@@ -147,7 +168,7 @@ struct PageConnexion: UIViewRepresentable {
                 case NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasUnknownRoot,
                     NSURLErrorServerCertificateHasBadDate, NSURLErrorServerCertificateNotYetValid,
                     NSURLErrorSecureConnectionFailed:
-                    return "L’identité de la maison n’a pas pu être vérifiée. Connexion refusée par sécurité."
+                    return texteIdentite
                 case NSURLErrorAppTransportSecurityRequiresSecureConnection:
                     return "Cette version de l’app ne peut pas ouvrir la page de connexion de la maison."
                 default: break
