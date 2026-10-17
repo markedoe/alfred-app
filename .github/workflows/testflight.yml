@@ -46,6 +46,7 @@ jobs:
       - name: Clé d'API App Store Connect
         env:
           ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
         # le fichier .p8 tel quel, ou encodé en base64 : les deux sont acceptés ; contrôle sans afficher la clé
         run: |
           umask 077
@@ -53,14 +54,14 @@ jobs:
           # repère d'une clé PEM, écrit sans son en-tête complet (la garde de confidentialité du dépôt le refuse)
           repere="PRIVATE KEY-----"
           if [[ "$ASC_CLE_P8_B64" == *"$repere"* ]]; then
-            printf '%s\n' "$ASC_CLE_P8_B64" > "$RUNNER_TEMP/asc/cle.p8"
+            printf '%s\n' "$ASC_CLE_P8_B64" > "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
           else
             printf '%s' "$ASC_CLE_P8_B64" | python3 -c \
               'import base64, sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read().strip(), validate=True))' \
-              > "$RUNNER_TEMP/asc/cle.p8"
+              > "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
           fi
-          grep -q -- "$repere" "$RUNNER_TEMP/asc/cle.p8" \
-            || { echo "::error::ASC_CLE_P8_B64 : pas une clé .p8 ($(wc -c < "$RUNNER_TEMP/asc/cle.p8") octets)"; exit 1; }
+          grep -q -- "$repere" "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" \
+            || { echo "::error::ASC_CLE_P8_B64 : pas une clé .p8 ($(wc -c < "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8") octets)"; exit 1; }
       - name: Archive (Release, signature automatique)
         env:
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
@@ -73,7 +74,7 @@ jobs:
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/Alfred.xcarchive" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/asc/cle.p8" \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" \
             -authenticationKeyID "$ASC_CLE_ID" \
             -authenticationKeyIssuerID "$ASC_EMETTEUR_ID" \
             ALFRED_EQUIPE="$APPLE_EQUIPE_ID" \
@@ -97,7 +98,7 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
             -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/asc/cle.p8" \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" \
             -authenticationKeyID "$ASC_CLE_ID" \
             -authenticationKeyIssuerID "$ASC_EMETTEUR_ID" 2>&1 | tee "$RUNNER_TEMP/export.log"
       - name: Effacer la clé
