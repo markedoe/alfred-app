@@ -31,7 +31,7 @@ dépasser ce que le relais permet.
 - **Image Swift :** épinglée par empreinte.
 - **Contrôles :** gitleaks à chaque envoi ; CodeQL (Swift et workflows).
 - **Secrets :** seuls les workflows `TestFlight` (lancement manuel ou étiquette) et `Certificats` (lancement manuel,
-  clé d’API seule, lecture seule) les lisent. Ils ne sont jamais transmis à une contribution extérieure.
+  clé d’API seule) les lisent. Ils ne sont jamais transmis à une contribution extérieure.
 - **Signature :** automatique, gérée par Apple. Aucun certificat ni profil n’est stocké.
 
 ## Signaler une faille

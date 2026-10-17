@@ -1,10 +1,26 @@
-# Inventaire des certificats de signature de l'équipe Apple, lancement à la main seulement, en lecture seule : type,
-# repère, dates, actif. Lit la clé d'API App Store Connect ; n'affiche aucun nom (celui du titulaire figure dans chaque
-# certificat, et ce journal est public).
+# Certificats de signature de l'équipe Apple, lancement à la main seulement : inventaire (lecture seule), ou création
+# du certificat unique de la CI (« Apple Development », réutilisé par chaque fabrication ; sa clé privée ne passe
+# jamais par ici, seule sa demande CSR). Lit la clé d'API App Store Connect ; n'affiche aucun nom (celui du titulaire
+# figure dans chaque certificat, et ce journal est public) : le certificat créé repart chiffré pour le destinataire
+# donné (CMS), jamais en clair dans un artefact.
 name: Certificats
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: "inventaire ou creer"
+        type: choice
+        options: [inventaire, creer]
+        default: inventaire
+      demande:
+        description: "creer : la demande de certificat (CSR au format PEM, encodée en base64)"
+        type: string
+        default: ""
+      destinataire:
+        description: "creer : le certificat qui chiffre le retour (PEM, encodé en base64)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -14,8 +30,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  inventaire:
-    name: Inventaire (lecture seule)
+  certificats:
+    name: Certificats (${{ inputs.action }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -27,11 +43,41 @@ jobs:
           ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
         run: scripts/cle-asc.sh
-      - name: Inventaire
+      - name: Certificats
         env:
+          ACTION: ${{ inputs.action }}
+          DEMANDE: ${{ inputs.demande }}
+          DESTINATAIRE: ${{ inputs.destinataire }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
           ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
-        run: ASC_CLE="$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8" python3 scripts/outils/certificats.py inventaire
+        run: |
+          export ASC_CLE="$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
+          outil=scripts/outils/certificats.py
+          case "$ACTION" in
+            inventaire)
+              python3 "$outil" inventaire ;;
+            creer)
+              umask 077
+              mkdir -p "$RUNNER_TEMP/creation" "$RUNNER_TEMP/retour"
+              printf '%s' "$DEMANDE" | base64 --decode > "$RUNNER_TEMP/creation/demande.csr"
+              printf '%s' "$DESTINATAIRE" | base64 --decode > "$RUNNER_TEMP/creation/destinataire.pem"
+              openssl req -in "$RUNNER_TEMP/creation/demande.csr" -noout -verify
+              openssl x509 -in "$RUNNER_TEMP/creation/destinataire.pem" -noout -checkend 0
+              python3 "$outil" creer "$RUNNER_TEMP/creation/demande.csr" "$RUNNER_TEMP/creation/certificat.der"
+              openssl cms -encrypt -binary -aes256 -outform DER \
+                -in "$RUNNER_TEMP/creation/certificat.der" -out "$RUNNER_TEMP/retour/certificat.cms" \
+                "$RUNNER_TEMP/creation/destinataire.pem"
+              rm -rf "$RUNNER_TEMP/creation"
+              python3 "$outil" inventaire ;;
+          esac
+      - name: Certificat chiffré
+        if: inputs.action == 'creer'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: certificat
+          path: ${{ runner.temp }}/retour/certificat.cms
+          retention-days: 1
+          if-no-files-found: error
       - name: Effacer la clé
         if: always()
-        run: rm -rf "$RUNNER_TEMP/asc"
+        run: rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/creation"

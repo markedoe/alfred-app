@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Inventaire des certificats de signature de l'équipe Apple, par l'API App Store Connect, en lecture seule
-(workflow « Certificats », lancé à la main).
+"""Certificats de signature de l'équipe Apple, par l'API App Store Connect (workflow « Certificats », à la main).
 
-    certificats.py inventaire      tous les certificats, sans aucun nom : type, repère, dates, actif
+    certificats.py inventaire                       tous les certificats, sans aucun nom : type, repère, dates, actif
+    certificats.py creer <demande.csr> <sortie.der>  crée le certificat « Apple Development » de la CI pour cette
+                                                    demande (CSR) ; un seul, réutilisé par chaque fabrication
 
 Le nom d'un certificat est celui du titulaire du compte : rien n'en est affiché, le journal d'un dépôt public est public.
 Un certificat se désigne par son repère, les 12 premiers caractères de l'empreinte SHA-256 de son numéro de série.
@@ -74,11 +75,12 @@ def jeton(cle, ident, emetteur, maintenant=None):
     return f"{entete}.{charge}.{_b64url(signature_brute(signe))}"
 
 
-def _api(chemin):
+def _api(chemin, corps=None):
     j = jeton(os.environ["ASC_CLE"], os.environ["ASC_CLE_ID"], os.environ["ASC_EMETTEUR_ID"])
     requete = urllib.request.Request(
         chemin if chemin.startswith("https://") else API + chemin,
-        headers={"Authorization": f"Bearer {j}"},
+        data=json.dumps(corps).encode() if corps is not None else None,
+        headers={"Authorization": f"Bearer {j}", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(requete, timeout=30) as r:
@@ -89,7 +91,8 @@ def _api(chemin):
         except ValueError:
             erreurs = []
         motifs = "; ".join(f"{x.get('code')} : {x.get('title')} ({x.get('detail')})" for x in erreurs)
-        sys.exit(f"App Store Connect : {chemin.split('?')[0]} → HTTP {e.code} {motifs}")
+        methode = "POST" if corps is not None else "GET"
+        sys.exit(f"App Store Connect : {methode} {chemin.split('?')[0]} → HTTP {e.code} {motifs}")
 
 
 def certificats():
@@ -149,8 +152,26 @@ def inventaire():
     print("par type : " + (", ".join(f"{t} {n}" for t, n in sorted(par_type.items())) or "aucun"))
 
 
+def creer(demande, sortie):
+    with open(demande) as f:
+        csr = f.read()
+    if "CERTIFICATE REQUEST-----" not in csr:
+        sys.exit(f"{demande} : pas une demande de certificat (CSR) au format PEM")
+    c = _api(
+        "/v1/certificates",
+        {"data": {"type": "certificates", "attributes": {"certificateType": "DEVELOPMENT", "csrContent": csr}}},
+    )["data"]
+    descripteur = os.open(sortie, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descripteur, "wb") as f:
+        f.write(base64.b64decode(c["attributes"]["certificateContent"]))
+    print("créé : " + _ligne(c))
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] == ["inventaire"]:
+    a = sys.argv[1:]
+    if a == ["inventaire"]:
         inventaire()
+    elif a[:1] == ["creer"] and len(a) == 3:
+        creer(a[1], a[2])
     else:
         sys.exit(__doc__)
