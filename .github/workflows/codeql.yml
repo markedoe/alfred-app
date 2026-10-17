@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# un nouvel envoi rend l'analyse précédente inutile : elle s'arrête (les Mac de GitHub sont comptés)
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   workflows:
     name: Workflows

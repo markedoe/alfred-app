@@ -97,12 +97,14 @@ func attendre(_ quoi: String, _ condition: @Sendable () async -> Bool) async thr
 
 @Suite("Client du relais", .serialized)
 struct ClientRelaisTests {
-    static func reglagesCourts() -> ClientRelais.Reglages {
+    /// Reconnexion rapide ; délais LONGS (3 s), pour qu'aucun test ne dépende de la vitesse de la machine (la CI est
+    /// jusqu'à 6 fois plus lente). Un test qui vérifie une expiration raccourcit SON délai, et rien d'autre.
+    static func reglagesBanc() -> ClientRelais.Reglages {
         var r = ClientRelais.Reglages()
-        r.delaiDemande = .milliseconds(200)
+        r.delaiDemande = .seconds(3)
         r.reconnexionInitiale = .milliseconds(20)
         r.reconnexionMaximale = .milliseconds(40)
-        r.delaiConfirmation = .milliseconds(150)
+        r.delaiConfirmation = .seconds(3)
         return r
     }
 
@@ -152,9 +154,9 @@ struct ClientRelaisTests {
         func nouvelles() async -> [ClientRelais.Nouvelle] { await journal.nouvelles }
     }
 
-    static func banc() async -> Banc {
+    static func banc(_ reglages: ClientRelais.Reglages = reglagesBanc()) async -> Banc {
         let f = AccesFactice()
-        let c = ClientRelais(acces: f, reglages: reglagesCourts())
+        let c = ClientRelais(acces: f, reglages: reglages)
         let j = Journal()
         let ecoute = Task { for await n in c.nouvelles { await j.noter(n) } }
         await c.demarrer()
@@ -203,7 +205,9 @@ struct ClientRelaisTests {
 
     @Test("Le relais ne répond pas : la synchronisation échoue après le délai, puis le client se reconnecte")
     func delaiDemande() async throws {
-        let b = await Self.banc()
+        var r = Self.reglagesBanc()
+        r.delaiDemande = .milliseconds(200)
+        let b = await Self.banc(r)
         defer { b.ecoute.cancel() }
         let l = try await b.liaison()
         await l.pousser(#"{"type":"ready"}"#)
@@ -233,7 +237,7 @@ struct ClientRelaisTests {
     @Test("Le délai d'un tour : échec et jamais de renvoi")
     func delaiTour() async throws {
         let f = AccesFactice()
-        var r = Self.reglagesCourts()
+        var r = Self.reglagesBanc()
         r.delaiTour = .milliseconds(100)
         let c = ClientRelais(acces: f, reglages: r)
         let j = Journal()
@@ -269,33 +273,41 @@ struct ClientRelaisTests {
         await b.client.arreter()
     }
 
-    @Test("Lumière : sans état reçu, échec visible ; refus de HA, échec avec son message")
-    func lumiereEchecs() async throws {
-        let b = await Self.banc()
+    @Test("Lumière : sans état reçu dans le délai, échec visible")
+    func lumiereSansConfirmation() async throws {
+        var r = Self.reglagesBanc()
+        r.delaiConfirmation = .milliseconds(150)
+        let b = await Self.banc(r)
         defer { b.ecoute.cancel() }
-        try await b.connecter(etats: [
-            ["entity_id": "light.a", "state": "off", "attributes": [:]],
-            ["entity_id": "light.b", "state": "on", "attributes": [:]],
-            ["entity_id": "light.c", "state": "unavailable", "attributes": [:]],
-        ])
-        let t1 = Task { await b.client.basculer(lumiere: "light.a") }
+        try await b.connecter(etats: [["entity_id": "light.a", "state": "off", "attributes": [:]]])
+        let t = Task { await b.client.basculer(lumiere: "light.a") }
         try await b.repondre(try await b.envoye("call_service"))
-        await t1.value
+        await t.value
         try await attendre("sans confirmation") {
             await b.nouvelles().contains(.commande(cle: "light.a", .sansConfirmation))
         }
+        #expect(await !b.client.commandeEnCours("light.a"))
+        await b.client.arreter()
+    }
 
+    @Test("Lumière : refus de HA, échec avec son message ; lumière indisponible, rien n'est envoyé")
+    func lumiereRefus() async throws {
+        let b = await Self.banc()
+        defer { b.ecoute.cancel() }
+        try await b.connecter(etats: [
+            ["entity_id": "light.b", "state": "on", "attributes": [:]],
+            ["entity_id": "light.c", "state": "unavailable", "attributes": [:]],
+        ])
         let l = try await b.liaison()
-        let t2 = Task { await b.client.basculer(lumiere: "light.b") }
-        try await attendre("2e appel") { await l.messages().filter { $0["type"] == "call_service" }.count == 2 }
-        let appel = await l.messages().last { $0["type"] == "call_service" }!
+        let t = Task { await b.client.basculer(lumiere: "light.b") }
+        let appel = try await b.envoye("call_service")
         #expect(appel["service"] == "turn_off")
         await l.pousser(
             ValeurJSON.objet([
                 "id": appel["id"]!, "type": "result", "success": false,
                 "error": ["code": "refuse", "message": "action non permise"],
             ]).enTexte())
-        await t2.value
+        await t.value
         try await attendre("refus") {
             await b.nouvelles().contains(.commande(cle: "light.b", .refusee("action non permise")))
         }
@@ -304,6 +316,7 @@ struct ClientRelaisTests {
         try await attendre("indisponible") {
             await b.nouvelles().contains(.commande(cle: "light.c", .refusee("État de la lumière indisponible.")))
         }
+        #expect(await l.messages().filter { $0["type"] == "call_service" }.count == 1)
         await b.client.arreter()
     }
 
