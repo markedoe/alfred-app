@@ -81,12 +81,16 @@ actor Journal {
     func noter(_ n: ClientRelais.Nouvelle) { nouvelles.append(n) }
 }
 
-/// Attend qu'une condition devienne vraie (2 s au plus).
+/// Attend qu'une condition devienne vraie (5 s au plus, en temps réel : les machines de la CI sont plus lentes, et
+/// un sommeil de 5 ms peut y durer bien plus). La condition doit porter sur un fait qui DURE : un état passager se
+/// lit dans le journal des nouvelles, jamais par sondage.
 func attendre(_ quoi: String, _ condition: @Sendable () async -> Bool) async throws {
-    for _ in 0..<400 {
+    let limite = ContinuousClock.now + .seconds(5)
+    while ContinuousClock.now < limite {
         if await condition() { return }
         try await Task.sleep(for: .milliseconds(5))
     }
+    if await condition() { return }
     Issue.record("attente dépassée : \(quoi)")
     throw ErreurRelais("attente dépassée : \(quoi)")
 }
@@ -197,16 +201,16 @@ struct ClientRelaisTests {
         await b.client.arreter()
     }
 
-    @Test("Le relais ne répond pas : la synchronisation échoue après le délai")
+    @Test("Le relais ne répond pas : la synchronisation échoue après le délai, puis le client se reconnecte")
     func delaiDemande() async throws {
         let b = await Self.banc()
         defer { b.ecoute.cancel() }
         let l = try await b.liaison()
         await l.pousser(#"{"type":"ready"}"#)
-        try await attendre("échec") { [client = b.client] in
-            await client.etat == ClientRelais.Etat.fatal("Délai de réponse dépassé")
-        }
+        // l'état « fatal » ne dure que jusqu'à la reconnexion (20 ms ici) : il se lit dans le journal
+        try await attendre("échec") { await b.nouvelles().contains(.etat(.fatal("Délai de réponse dépassé"))) }
         try await attendre("liaison fermée") { await l.fermee }
+        _ = try await b.liaison(1)
         await b.client.arreter()
     }
 
