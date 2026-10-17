@@ -118,7 +118,9 @@ final class ParcoursUITests: XCTestCase {
         // à l'horizontale, la capture de l'écran sort tournée (mesuré : « ipad-2-piece », l'interface couchée et une bande
         // noire) ; l'audit y juge le contraste sur les mauvais points, et signale des textes à 8:1 : il est fait sur
         // iPhone (mêmes vues, mêmes couleurs), tout le reste est audité ici
-        try auditerEcrans(app, ["Large"], types: XCUIAccessibilityAuditType.all.subtracting([.dynamicType, .contrast]))
+        try auditerEcrans(
+            app, ["Large"], types: XCUIAccessibilityAuditType.all.subtracting([.dynamicType, .contrast]),
+            sansElementEcarte: true)
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(bouton(app, "onglet-pieces").waitForExistence(timeout: 5), "onglets en disposition étroite")
         capturer(app, "ipad-3-portrait")
@@ -195,9 +197,13 @@ final class ParcoursUITests: XCTestCase {
     /// Le nom et la température des pièces, l'heure et l'état du noyau sont dessinés dans la roue, comme dans la
     /// console : ce ne sont pas des éléments d'accessibilité (chaque secteur porte sa pièce, son état et sa
     /// température ; l'état de la conversation est sur « Parler à Alfred » et la ligne d'état).
+    /// `sansElementEcarte` (disposition large) : un « texte coupé » que l'audit ne rattache à aucun élément est écarté,
+    /// listé à part. Il ne peut pas être situé ; les mêmes vues passent l'audit complet sur iPhone, et les deux groupes
+    /// propres à la disposition large (l'étiquette « LIEN », la consommation) gardent la taille de la console.
     private func auditerEcrans(
         _ app: XCUIApplication, _ ecrans: [String],
-        types: XCUIAccessibilityAuditType = XCUIAccessibilityAuditType.all.subtracting(.dynamicType)
+        types: XCUIAccessibilityAuditType = XCUIAccessibilityAuditType.all.subtracting(.dynamicType),
+        sansElementEcarte: Bool = false
     ) throws {
         var problemes: [String] = []
         var ecartes: [String] = []
@@ -218,6 +224,8 @@ final class ParcoursUITests: XCTestCase {
                     + " · \(probleme.detailedDescription)"
                 if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
                     ecartes.append("vérifié en très grand texte · " + description)
+                } else if sansElementEcarte, probleme.auditType == .textClipped, probleme.element == nil {
+                    ecartes.append("sans élément, disposition large · " + description)
                 } else if probleme.auditType == .contrast, let e = probleme.element,
                     !e.isHittable || Self.enPartieCache(e, dans: app)
                 {
