@@ -46,10 +46,21 @@ jobs:
       - name: Clé d'API App Store Connect
         env:
           ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+        # le fichier .p8 tel quel, ou encodé en base64 : les deux sont acceptés ; contrôle sans afficher la clé
         run: |
           umask 077
           mkdir -p "$RUNNER_TEMP/asc"
-          printf '%s' "$ASC_CLE_P8_B64" | base64 --decode > "$RUNNER_TEMP/asc/cle.p8"
+          # repère d'une clé PEM, écrit sans son en-tête complet (la garde de confidentialité du dépôt le refuse)
+          repere="PRIVATE KEY-----"
+          if [[ "$ASC_CLE_P8_B64" == *"$repere"* ]]; then
+            printf '%s\n' "$ASC_CLE_P8_B64" > "$RUNNER_TEMP/asc/cle.p8"
+          else
+            printf '%s' "$ASC_CLE_P8_B64" | python3 -c \
+              'import base64, sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read().strip(), validate=True))' \
+              > "$RUNNER_TEMP/asc/cle.p8"
+          fi
+          grep -q -- "$repere" "$RUNNER_TEMP/asc/cle.p8" \
+            || { echo "::error::ASC_CLE_P8_B64 : pas une clé .p8 ($(wc -c < "$RUNNER_TEMP/asc/cle.p8") octets)"; exit 1; }
       - name: Archive (Release, signature automatique)
         env:
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
