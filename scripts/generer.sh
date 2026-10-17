@@ -21,7 +21,12 @@ if [[ -n "${ALFRED_RELAIS:-}" ]]; then
     plutil -insert Relais -string "$ALFRED_RELAIS" "$CONFIG"
     if [[ -n "${ALFRED_AUTORITE_PEM_B64:-}" ]]; then
         tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-        printf '%s' "$ALFRED_AUTORITE_PEM_B64" | base64 --decode > "$tmp/ca.pem"
+        # « openssl base64 -A » : une seule ligne, comme le secret (le « base64 --decode » des Mac de GitHub ne
+        # rendait pas le certificat) ; contrôles sans jamais afficher le contenu
+        printf '%s' "$ALFRED_AUTORITE_PEM_B64" | tr -d ' \r\n' | openssl base64 -d -A > "$tmp/ca.pem"
+        [[ -s "$tmp/ca.pem" ]] || { echo "ALFRED_AUTORITE_PEM_B64 : décodage vide" >&2; exit 1; }
+        grep -q -- "-----BEGIN CERTIFICATE-----" "$tmp/ca.pem" \
+            || { echo "ALFRED_AUTORITE_PEM_B64 : pas un certificat PEM ($(wc -c < "$tmp/ca.pem") octets)" >&2; exit 1; }
         # une AUTORITÉ, pas un certificat de serveur : l'app ne fait confiance qu'à elle pour ce relais.
         # « -text » est compris par OpenSSL comme par LibreSSL (l'openssl de macOS, sans « -ext ») ; lu dans une
         # variable, pas par un tube : « grep -q » couperait openssl, et pipefail ferait échouer le test
