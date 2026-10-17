@@ -175,9 +175,9 @@ final class ParcoursUITests: XCTestCase {
     }
 
     /// Un élément coupé par le bord d'une zone qui défile (en partie dans la vue, en partie dessous).
-    private func enPartieCache(_ e: XCUIElement) -> Bool {
+    private static func enPartieCache(_ e: XCUIElement, dans app: XCUIApplication) -> Bool {
         let cadre = e.frame
-        return XCUIApplication().scrollViews.allElementsBoundByIndex.contains { zone in
+        return app.scrollViews.allElementsBoundByIndex.contains { zone in
             zone.frame.intersects(cadre) && !zone.frame.contains(cadre)
         }
     }
@@ -218,7 +218,9 @@ final class ParcoursUITests: XCTestCase {
                     + " · \(probleme.detailedDescription)"
                 if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
                     ecartes.append("vérifié en très grand texte · " + description)
-                } else if probleme.auditType == .contrast, let e = probleme.element, !e.isHittable || enPartieCache(e) {
+                } else if probleme.auditType == .contrast, let e = probleme.element,
+                    !e.isHittable || Self.enPartieCache(e, dans: app)
+                {
                     // hors de la vue : sous le bord d'un panneau qui défile, ou sous la carte d'une pièce ; un texte
                     // qu'on ne voit pas ne se juge pas sur ce qui le recouvre (il l'est une fois amené dans la vue)
                     ecartes.append("hors de la vue · " + description)
