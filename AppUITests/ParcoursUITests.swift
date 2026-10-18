@@ -22,12 +22,14 @@ final class ParcoursUITests: XCTestCase {
         return app
     }
 
-    /// La démo est prête (« Parler à Alfred » actif) : l'audit porte sur l'état stable, pas sur le démarrage.
+    /// La démo est prête (« Parler à Alfred » actif) : l'audit porte sur l'état stable, pas sur le démarrage. Jusqu'à
+    /// 30 s : sur les Mac de la CI, le simulateur met parfois 20 s à lancer l'app (vidéos des tests), et le test attend
+    /// alors un bouton déjà affiché.
     private func attendrePret(_ app: XCUIApplication) {
         let parler = bouton(app, "parler")
-        XCTAssertTrue(parler.waitForExistence(timeout: 10))
+        XCTAssertTrue(parler.waitForExistence(timeout: 30))
         let actif = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: parler)
-        XCTAssertEqual(XCTWaiter().wait(for: [actif], timeout: 10), .completed, "la démo ne devient pas prête")
+        XCTAssertEqual(XCTWaiter().wait(for: [actif], timeout: 30), .completed, "la démo ne devient pas prête")
     }
 
     /// Un élément dont le libellé d'accessibilité contient ce texte, sans tenir compte de la casse : les titres de la
@@ -327,14 +329,17 @@ final class ParcoursUITests: XCTestCase {
                     ecartes.append("hors de la vue · " + description)
                 } else if probleme.auditType == .contrast, let c = capture,
                     let mesure = probleme.element.map({ e in c.contraste(e.frame).map { ($0, e.label) } })
-                        ?? c.minimum(app),
-                    mesure.0 >= 4.5
+                        ?? c.minimum(app)
                 {
-                    // démenti par la mesure : le texte visé (ou, sans élément, TOUS les textes et boutons visibles) atteint
-                    // 4,5:1 sur la capture (WCAG AA pour un petit texte) ; la mesure est notée
-                    ecartes.append(
+                    // le texte visé (ou, sans élément, le moins contrasté de TOUS les textes et boutons visibles) mesuré
+                    // sur la capture ; démenti s'il atteint 4,5:1 (WCAG AA pour un petit texte) ; la mesure est notée
+                    let note =
                         "contraste mesuré sur la capture : " + String(format: "%.1f", mesure.0) + ":1 (« \(mesure.1) »)"
-                            + " · " + description)
+                    if mesure.0 >= 4.5 {
+                        ecartes.append(note + " · " + description)
+                    } else {
+                        problemes.append(description + " · " + note)
+                    }
                 } else {
                     problemes.append(description)
                 }
@@ -351,8 +356,10 @@ final class ParcoursUITests: XCTestCase {
 }
 
 /// Une capture de l'écran, lue pixel par pixel : le contraste (WCAG) d'un texte dans son cadre. Le fond est la couleur la
-/// plus fréquente sur le pourtour du cadre ; le texte, la couleur (au moins 2 % des pixels) la plus contrastée avec ce
-/// fond. Les couleurs sont ramenées à des pas de 8 (les bords lissés d'un même texte se regroupent).
+/// plus fréquente sur le pourtour du cadre, lu 2 pt à l'intérieur (le bord d'un bouton est son trait, pas le fond de son
+/// texte : « Écrire » mesurait 3,6:1, le trait contre le fond, au lieu de 13,8:1) ; le texte, la couleur (au moins 2 % des
+/// pixels) la plus contrastée avec ce fond. Les couleurs sont ramenées à des pas de 8 (les bords lissés d'un même texte se
+/// regroupent).
 @MainActor
 private struct Capture {
     private let pixels: [UInt8]
@@ -392,6 +399,9 @@ private struct Capture {
     }
 
     func contraste(_ cadre: CGRect) -> Double? {
+        // 2 pt en retrait, au plus le quart du petit côté (un texte d'une ligne garde sa hauteur utile)
+        let retrait = min(2, min(cadre.width, cadre.height) / 4)
+        let cadre = cadre.insetBy(dx: retrait, dy: retrait)
         let x0 = max(0, Int(cadre.minX * echelle))
         let x1 = min(largeur - 1, Int(cadre.maxX * echelle))
         let y0 = max(0, Int(cadre.minY * echelle))
