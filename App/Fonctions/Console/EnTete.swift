@@ -20,9 +20,6 @@ struct EnTeteConsole: View {
     @Binding var fenetre: FenetreConsole?
     @Binding var liensOuverts: Bool
     @State private var quitter = false
-    /// « MANOR COMMAND » : 11 pt, 9 sur téléphone (la console : `#brand-sub`), avec la taille du texte (plafonnée ici).
-    @ScaledMetric(relativeTo: .caption2) private var sousMarque: CGFloat = 11
-    @ScaledMetric(relativeTo: .caption2) private var sousMarqueTelephone: CGFloat = 9
 
     private var large: Bool { largeur > 1100 }
     private var textes: Bool { largeur > 560 }
@@ -32,6 +29,8 @@ struct EnTeteConsole: View {
             ligne(serre: false)
             ligne(serre: true)
         }
+        // jamais plus large que l'écran : un en-tête trop large décalerait toute la console
+        .frame(maxWidth: largeur - (large ? 48 : 32), alignment: .leading)
         // une barre de l'app, comme celles du système : à la taille de la console ; un appui long montre un bouton en
         // grand (visionneuse de grand contenu)
         .dynamicTypeSize(...DynamicTypeSize.large)
@@ -74,7 +73,7 @@ struct EnTeteConsole: View {
 
     private func ligne(serre: Bool) -> some View {
         HStack(spacing: large ? 20 : textes ? 12 : 8) {
-            marque(serre: serre)
+            Marque(textes: textes, serre: serre, lien: LienMaison.mot(alfred.liaison))
             if large {
                 Rectangle().fill(Color(.trait)).frame(width: 1, height: 24).accessibilityHidden(true)
             }
@@ -104,23 +103,6 @@ struct EnTeteConsole: View {
                 compte
             }
         }
-    }
-
-    private func marque(serre: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ALFRED")
-                .font(.title2.weight(.heavy))
-                .tracking(serre ? 2.2 : textes ? 6 : 4)
-                .foregroundStyle(Color(.glace))
-            Text("MANOR COMMAND")
-                .font(.system(size: textes ? sousMarque : sousMarqueTelephone, weight: .semibold))
-                .tracking(serre ? 1 : 1.6)
-                .foregroundStyle(Color(.champagne))
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Alfred")
-        .accessibilityAddTraits(.isHeader)
     }
 
     /// Le compte : l'icône de sortie (sarcelle, comme la console connectée) et le nom de la personne dessous.
@@ -156,6 +138,36 @@ struct EnTeteConsole: View {
 }
 
 // MARK: - éléments de l'en-tête
+
+/// ALFRED / MANOR COMMAND. Une vue à part : ses mesures suivent la taille du texte plafonnée de l'en-tête (une mesure
+/// déclarée dans l'en-tête lui-même lirait la taille d'avant le plafond). Sur téléphone, le lien n'est qu'un point de
+/// couleur : son état est lu ici par VoiceOver (« Alfred, lien : Connecté »).
+private struct Marque: View {
+    let textes: Bool
+    let serre: Bool
+    let lien: String
+    /// « MANOR COMMAND » : 11 pt, 9 sur téléphone (la console : `#brand-sub`).
+    @ScaledMetric(relativeTo: .caption2) private var sousMarque: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption2) private var sousMarqueTelephone: CGFloat = 9
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("ALFRED")
+                .font(.title2.weight(.heavy))
+                .tracking(serre ? 2.2 : textes ? 6 : 4)
+                .foregroundStyle(Color(.glace))
+            Text("MANOR COMMAND")
+                .font(.system(size: textes ? sousMarque : sousMarqueTelephone, weight: .semibold))
+                .tracking(serre ? 1 : 1.6)
+                .foregroundStyle(Color(.champagne))
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Alfred")
+        .accessibilityValue(textes ? "" : "lien : " + lien)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
 
 /// Le cadre d'un bouton-icône de l'en-tête (`#system-toggle`, `#qui-lien`) : 34 pt, bordure du trait, sans fond ;
 /// bordure du faisceau quand sa fenêtre est ouverte.
@@ -334,17 +346,21 @@ struct LienMaison: View {
                 }
             }
         }
-        .frame(minHeight: 44)
+        .frame(minWidth: texte ? 44 : nil, minHeight: 44)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Lien avec la maison")
         .accessibilityValue(mot)
         .accessibilityIdentifier("lien")
+        // sur téléphone, un point de couleur : son état est lu avec la marque (sans cible trop petite pour VoiceOver)
+        .accessibilityHidden(!texte)
     }
 
     private var couleur: Color { alfred.estPret ? Color(.sarcelle) : Color(.sodium) }
 
-    private var mot: String {
-        switch alfred.liaison {
+    private var mot: String { Self.mot(alfred.liaison) }
+
+    static func mot(_ liaison: ClientRelais.Etat) -> String {
+        switch liaison {
         case .pret: "Connecté"
         case .connexion: "…"
         case .synchronisation: "Synchronisation…"

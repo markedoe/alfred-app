@@ -9,6 +9,7 @@ import SwiftUI
 struct ConsoleVue: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
+    @Environment(\.animationsCoupees) private var immobile
     @State private var vue = VueConsole.pieces
     @State private var choisi: String?
     @State private var ecrire = false
@@ -105,8 +106,9 @@ struct ConsoleVue: View {
             }
         }
         .animation(.smooth(duration: 0.25), value: ecrire)
-        .animation(.smooth(duration: 0.2), value: fenetre)
-        .animation(.smooth(duration: 0.15), value: liensOuverts)
+        // tests d'interface : aucune transition (l'audit juge l'écran final, pas un fondu)
+        .animation(immobile ? nil : .smooth(duration: 0.2), value: fenetre)
+        .animation(immobile ? nil : .smooth(duration: 0.15), value: liensOuverts)
         .sensoryFeedback(trigger: conversation.enConversation) { _, ouvert in ouvert ? .start : .stop }
         .sensoryFeedback(.success, trigger: conversation.reponses)
         .sensoryFeedback(trigger: alfred.dernierRetour) { _, retour in

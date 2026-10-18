@@ -107,13 +107,15 @@ struct FenetreReglages: View {
                     Text(nomChoisi)
                         .font(.body)
                         .foregroundStyle(Color(.texte))
-                        .lineLimit(1)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color(.texteSecondaire))
                 }
                 .padding(.horizontal, 14)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .background(Console.bouton, in: .rect(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.acier), lineWidth: 1.5))
@@ -178,6 +180,9 @@ struct FenetreReglages: View {
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityValue(
+                    conversation.essai == .actif ? "signal \(JaugeEssai.pourcentage(conversation)) %" : ""
+                )
                 .accessibilityIdentifier("messageMicro")
             JaugeEssai()
         }
@@ -264,11 +269,11 @@ private struct JaugeEssai: View {
             }
         }
         .frame(height: 10)
-        .accessibilityElement()
-        .accessibilityLabel("Signal du microphone testé")
-        .accessibilityValue(
-            conversation.essai == .actif ? "\(Int(min(1, conversation.niveauEssai * 1.3) * 100)) %" : "0 %")
+        // une barre de 10 pt n'est pas une cible : le signal est lu avec le message au-dessus
+        .accessibilityHidden(true)
     }
+
+    static func pourcentage(_ c: Conversation) -> Int { Int(min(1, c.niveauEssai * 1.3) * 100) }
 }
 
 /// Une ligne d'état de la console (`#system .stat`) : libellé en capitales, valeur à droite en chiffres fixes, un trait

@@ -236,9 +236,10 @@ private struct Badges: View {
     }
 
     private func badge(_ texte: String) -> some View {
+        // le texte (et non la brume de la console) : dans un cadre si petit, l'audit d'Apple compare la brume au trait
         Text(texte)
             .font(.caption2)
-            .foregroundStyle(Color(.texteSecondaire))
+            .foregroundStyle(Color(.texte))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(.trait), lineWidth: 1))
@@ -436,20 +437,13 @@ struct PanneauEnvironnement: View {
 struct PastillesEtat: View {
     @Environment(Alfred.self) private var alfred
     @Environment(\.openURL) private var ouvrir
-    /// Les noms des groupes : 10 pt comme la console, avec la taille du texte (plafonnée : un instrument).
-    @ScaledMetric(relativeTo: .caption2) private var tailleNom: CGFloat = 10
 
     var body: some View {
         if let etat = alfred.annexes?.etat, !etat.groupes.isEmpty {
             let contenu = FluxPastilles(espacement: 14, interligne: 4) {
                 ForEach(etat.groupes) { g in
                     HStack(spacing: 4) {
-                        Text(g.nomCourt)
-                            .font(.system(size: tailleNom, weight: .semibold))
-                            .tracking(0.8)
-                            .textCase(.uppercase)
-                            .foregroundStyle(Color(.texteSecondaire))
-                            .padding(.trailing, 2)
+                        NomGroupe(nom: g.nomCourt)
                         ForEach(g.services) { s in
                             Circle()
                                 .fill(Self.couleur(s.statut))
@@ -507,6 +501,22 @@ struct PastillesEtat: View {
         let autres = e.groupes.flatMap(\.services).filter { $0.statut != "ok" }
         guard !autres.isEmpty else { return "tout est en service" }
         return autres.map { "\($0.nom) : \($0.mot)" }.joined(separator: " ; ")
+    }
+}
+
+/// Le nom d'un groupe de pastilles : 10 pt comme la console, avec la taille du texte plafonnée des pastilles (une vue
+/// à part, pour que sa mesure lise la taille d'après le plafond).
+private struct NomGroupe: View {
+    let nom: String
+    @ScaledMetric(relativeTo: .caption2) private var taille: CGFloat = 10
+
+    var body: some View {
+        Text(nom)
+            .font(.system(size: taille, weight: .semibold))
+            .tracking(0.8)
+            .textCase(.uppercase)
+            .foregroundStyle(Color(.texteSecondaire))
+            .padding(.trailing, 2)
     }
 }
 

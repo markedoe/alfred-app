@@ -13,10 +13,8 @@ struct Fenetre<Contenu: View>: View {
 
     var body: some View {
         ZStack {
-            // le voile (#02080dcc, flou de 4 pt) : il ne ferme rien, comme celui de la console
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(Color(red: 2 / 255, green: 8 / 255, blue: 13 / 255).opacity(0.8))
+            // le voile de la console (#02080dcc) : la console reste devinée dessous ; il ne ferme rien
+            Color(red: 2 / 255, green: 8 / 255, blue: 13 / 255).opacity(0.8)
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
                 .onTapGesture {}
@@ -33,7 +31,10 @@ struct Fenetre<Contenu: View>: View {
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($focusTitre)
                                 .padding(.top, 11)
+                                // le titre d'abord : c'est le trait qui cède la place
+                                .layoutPriority(1)
                             LinearGradient(colors: [Color(.trait), .clear], startPoint: .leading, endPoint: .trailing)
+                                .frame(minWidth: 0, maxWidth: .infinity)
                                 .frame(height: 2)
                                 .padding(.top, 21)
                                 .accessibilityHidden(true)
@@ -354,11 +355,19 @@ private struct CarteNotification: View {
 // MARK: - mode invités
 
 extension View {
-    /// Le mode invités de la console : flou de 7 pt, ni sélection ni toucher, et rien pour VoiceOver.
-    func masqueInvites(_ actif: Bool) -> some View {
-        blur(radius: actif ? 7 : 0)
-            .allowsHitTesting(!actif)
-            .accessibilityHidden(actif)
-            .animation(.easeInOut(duration: 0.3), value: actif)
+    /// Le mode invités de la console : flou de 7 pt, ni sélection ni toucher, et rien pour VoiceOver. Hors du mode
+    /// invités, la vue reste telle quelle (aucun filtre posé).
+    func masqueInvites(_ actif: Bool) -> some View { modifier(MasqueInvites(actif: actif)) }
+}
+
+private struct MasqueInvites: ViewModifier {
+    let actif: Bool
+
+    func body(content: Content) -> some View {
+        if actif {
+            content.blur(radius: 7).allowsHitTesting(false).accessibilityHidden(true)
+        } else {
+            content
+        }
     }
 }
