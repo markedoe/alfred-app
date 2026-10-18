@@ -44,8 +44,14 @@ struct ConversationTests {
         let r = c.messages[1]
         #expect(r.auteur == .alfred && !r.enCours && !r.erreur)
         #expect(r.texte.localizedCaseInsensitiveContains("cuisine"))
-        #expect(r.outils.map(\.libelle) == ["Allumer · Cuisine"])
+        // « Détails techniques », comme la console : le nom court de l'outil et ses arguments
+        #expect(r.outils.map(\.nom) == ["HassTurnOn"])
+        #expect(r.outils.map(\.arguments) == ["Cuisine"])
         #expect(r.outils.first?.etat == .fait)
+        // le badge de durée, et « Dernière réponse » dans Réglages & état
+        let duree = try #require(r.duree)
+        #expect(duree > 0 && duree < 5)
+        #expect(c.derniereDuree == duree)
         #expect(voix.lues.isEmpty, "réponse écrite : pas lue à voix haute par défaut")
         #expect(c.reponses == 1)
         await client.arreter()
@@ -91,15 +97,45 @@ struct ConversationTests {
         #expect(voix.accueils == 1)
     }
 
-    @Test("Libellés des actions, sans jamais le contenu des résultats")
-    func libelles() {
-        #expect(
-            Conversation.libelle(AppelOutil(id: "1", nom: "HassTurnOff", arguments: ["name": "Bureau"]))
-                == "Éteindre · Bureau")
-        #expect(
-            Conversation.libelle(AppelOutil(id: "1", nom: "homeassistant__GetLiveContext"))
-                == "Lire l’état de la maison")
-        #expect(Conversation.libelle(AppelOutil(id: "1", nom: "script__rappel_du_soir")) == "Rappel Du Soir")
+    @Test("Détails techniques : un outil annoncé deux fois n'apparaît qu'une fois ; son échec se voit")
+    func outils() {
+        let c = Conversation(voix: VoixMuette())
+        c.recevoir(.reflechit)
+        let appel = AppelOutil(id: "t1", nom: "homeassistant__HassTurnOff", arguments: ["name": "Bureau"])
+        c.recevoir(.outilCommence(appel))
+        c.recevoir(.outilCommence(appel))
+        c.recevoir(.outilTermine(appelId: "t1", succes: false))
+        let o = c.messages.last?.outils
+        #expect(o?.map(\.nom) == ["HassTurnOff"])
+        #expect(o?.first?.arguments == "Bureau" && o?.first?.etat == .echec)
+    }
+
+    @Test("Essai du micro : le niveau s'affiche, aucun tour ne part ; arrêté, le micro est libéré")
+    func essai() async throws {
+        let (c, client, voix) = try await Self.pret()
+        await c.basculerEssai()
+        #expect(c.essai == .actif)
+        voix.entendre([Float](repeating: 0.3, count: 320))
+        try await Self.attendre(c) { $0.niveauEssai > 0 }
+        #expect(c.messages.isEmpty && c.phase == .repos && !c.enConversation)
+        // une conversation ne s'ouvre pas pendant l'essai
+        await c.basculerEcoute()
+        #expect(!c.enConversation)
+        c.arreterEssai()
+        #expect(c.essai == .arrete && c.niveauEssai == 0)
+        #expect(c.messageEssai == "Test arrêté · microphone libéré.")
+        await client.arreter()
+    }
+
+    @Test("Micro choisi disparu : retour au micro d'iOS, et on le dit")
+    func entreeOubliee() async throws {
+        let (c, client, voix) = try await Self.pret()
+        voix.entreeOubliee = true
+        await c.basculerEcoute()
+        #expect(c.avis?.texte == "Le micro choisi n’est plus là : retour au micro par défaut.")
+        #expect(!voix.entreeOubliee)
+        await c.terminer()
+        await client.arreter()
     }
 
     @Test("Nouvelle conversation : le fil est oublié")

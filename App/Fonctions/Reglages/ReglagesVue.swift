@@ -1,111 +1,83 @@
+import AlfredKit
 import SwiftUI
 
-/// Les réglages, comme la fenêtre « Réglages & état » de la console : le compte, la voix, la confidentialité, l'app.
-/// Des titres de section de la console et des cartes, plutôt que la liste groupée du système (son en-tête de section
-/// atténue la couleur des titres sous le contraste AA, mesuré par l'audit d'accessibilité d'Apple).
-struct ReglagesVue: View {
+/// « Réglages & état », la fenêtre de la console (décision du 18.10 : la fenêtre de la console, puis les
+/// réglages propres à l'app dessous) : le modèle, les entités, la dernière réponse, le micro (choix, autorisation,
+/// essai), la note de la console ; puis le compte, la lecture des réponses écrites, les engagements de confidentialité,
+/// la version et le code source.
+struct FenetreReglages: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
-    @Environment(\.dismiss) private var fermer
+    let fermer: () -> Void
     @State private var confirmer = false
+    @State private var entrees: [EntreeMicro] = []
+    @State private var choisie: String?
+    @State private var autorise = false
 
     var body: some View {
-        @Bindable var conversation = conversation
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Compte").titreSection()
-                    Carte {
-                        Ligne("Connecté en tant que", valeur: alfred.moi?.nom ?? "—")
-                        if !alfred.demo, let hote = alfred.configuration?.relais.hote {
-                            Separateur()
-                            Ligne("Maison", valeur: hote)
-                        }
-                        Separateur()
-                        // la démo n'a pas de compte : on la quitte, rien à déconnecter
-                        if alfred.demo {
-                            Button("Quitter la démonstration") {
-                                Task {
-                                    await alfred.quitterDemo()
-                                    fermer()
-                                }
-                            }
-                            .buttonStyle(StyleLien())
-                        } else {
-                            Button("Se déconnecter", role: .destructive) { confirmer = true }
-                                .buttonStyle(StyleLien(alerte: true))
-                                .confirmationDialog(
-                                    "Se déconnecter de la maison ?", isPresented: $confirmer,
-                                    titleVisibility: .visible
-                                ) {
-                                    Button("Se déconnecter", role: .destructive) {
-                                        Task {
-                                            await alfred.seDeconnecter()
-                                            fermer()
-                                        }
-                                    }
-                                } message: {
-                                    Text(
-                                        "La connexion de cet appareil est supprimée dans Home Assistant. Vous pourrez vous reconnecter."
-                                    )
-                                }
-                        }
-                    }
+        Fenetre(titre: "Réglages & état", largeurMax: 470, fermer: { fermerFenetre() }) {
+            VStack(alignment: .leading, spacing: 0) {
+                LigneEtat("Modèle", valeur: alfred.moteur ?? "—")
+                LigneEtat("Entités", valeur: alfred.nombreEntites.map(String.init) ?? "—")
+                LigneEtat("Dernière réponse", valeur: conversation.derniereDuree.map(Self.duree) ?? "—")
+                micro
+                actionsMicro
+                    .padding(.top, 14)
+                retourMicro
+                    .padding(.top, 12)
+                Text(
+                    "Le test du micro n’envoie aucune commande à la maison. Avec un clavier : espace pour parler, / pour écrire."
+                )
+                .font(.footnote)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
 
-                    Text("Voix").titreSection().padding(.top, 16)
-                    Carte {
-                        Toggle(isOn: $conversation.lireReponsesEcrites) {
-                            Text("Lire à voix haute les réponses écrites")
-                                .font(.callout)
-                                .foregroundStyle(Color(.texte))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .tint(Color(.faisceau))
-                        .padding(.vertical, 6)
-                    }
-                    Note(
-                        "Quand vous parlez, Alfred répond à voix haute. Quand vous écrivez, il répond par écrit, sauf si vous activez ce réglage."
-                    )
+                compte
+                    .padding(.top, 22)
+                voix
+                    .padding(.top, 22)
+                confidentialite
+                    .padding(.top, 22)
 
-                    Text("Confidentialité").titreSection().padding(.top, 16)
-                    Carte {
-                        Engagement("Votre voix ne va que vers votre maison, jamais sur internet.", icone: "house")
-                        Separateur()
-                        Engagement(
-                            "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan.",
-                            icone: "mic.slash")
-                        Separateur()
-                        Engagement("La conversation n’est pas gardée sur cet appareil.", icone: "trash")
-                    }
-
-                    Text("À propos").titreSection().padding(.top, 16)
-                    Carte {
-                        Ligne("Version", valeur: Self.version)
-                        if let code = URL(string: "https://github.com/markedoe/alfred-app") {
-                            Separateur()
-                            Link("Code source", destination: code)
-                                .buttonStyle(StyleLien())
-                        }
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Version \(Self.version)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(Color(.texteSecondaire))
+                        .accessibilityIdentifier("version")
+                    Spacer(minLength: 12)
+                    if let code = URL(string: "https://github.com/markedoe/alfred-app") {
+                        Link("Code source", destination: code)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color(.faisceau))
+                            .frame(minHeight: 44)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
-                .frame(maxWidth: 640)
-                .frame(maxWidth: .infinity)
-            }
-            .scrollEdgeEffectHidden(true, for: .all)
-            .background(Console.fond)
-            .navigationTitle("Réglages & état")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Console.bandeau, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("OK") { fermer() }
-                }
+                .padding(.top, 18)
             }
         }
+        .onAppear(perform: lireEntrees)
+        .confirmationDialog("Se déconnecter de la maison ?", isPresented: $confirmer, titleVisibility: .visible) {
+            Button("Se déconnecter", role: .destructive) {
+                Task {
+                    fermer()
+                    await alfred.seDeconnecter()
+                }
+            }
+        } message: {
+            Text("La connexion de cet appareil est supprimée dans Home Assistant. Vous pourrez vous reconnecter.")
+        }
     }
+
+    private func fermerFenetre() {
+        // comme la console : l'essai du micro s'arrête avec la fenêtre (« Test interrompu »)
+        conversation.arreterEssai()
+        fermer()
+    }
+
+    /// « 1.4s » (la console : `dt.toFixed(1) + "s"`).
+    static func duree(_ s: Double) -> String { String(format: "%.1fs", locale: Locale(identifier: "en_US_POSIX"), s) }
 
     static var version: String {
         let i = Bundle.main.infoDictionary
@@ -113,53 +85,242 @@ struct ReglagesVue: View {
         let b = i?["CFBundleVersion"] as? String ?? "?"
         return "\(v) (\(b))"
     }
-}
 
-/// Une carte de la console : fond bleu nuit, bordure, ses lignes l'une sous l'autre.
-private struct Carte<Contenu: View>: View {
-    @ViewBuilder let contenu: Contenu
+    // MARK: - micro
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { contenu }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Console.carte, in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.trait), lineWidth: 1.5))
+    private func lireEntrees() {
+        entrees = conversation.entreesMicro()
+        choisie = conversation.entreeMicroChoisie
+    }
+
+    /// « Microphone » et la liste des micros (la console : `#mic`, un menu sur toute la largeur).
+    private var micro: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Microphone").modifier(EtiquetteEtat())
+            Menu {
+                Picker("Microphone", selection: $choisie) {
+                    Text("Micro d’iOS (par défaut)").tag(String?.none)
+                    ForEach(entrees) { e in Text(e.nom).tag(Optional(e.uid)) }
+                }
+            } label: {
+                HStack {
+                    Text(nomChoisi)
+                        .font(.body)
+                        .foregroundStyle(Color(.texte))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color(.texteSecondaire))
+                }
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Console.bouton, in: .rect(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.acier), lineWidth: 1.5))
+                .contentShape(.rect)
+            }
+            .disabled(conversation.essai == .ouverture || conversation.enConversation)
+            .accessibilityLabel("Périphérique d’entrée audio")
+            .accessibilityValue(nomChoisi)
+            .accessibilityIdentifier("micro")
+            .onChange(of: choisie) { _, uid in
+                guard uid != conversation.entreeMicroChoisie else { return }
+                conversation.choisirEntreeMicro(uid)
+            }
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color(.trait)).frame(height: 1).accessibilityHidden(true)
+        }
+    }
+
+    private var nomChoisi: String {
+        entrees.first { $0.uid == choisie }?.nom ?? "Micro d’iOS (par défaut)"
+    }
+
+    private var actionsMicro: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { boutonsMicro }
+            VStack(alignment: .leading, spacing: 10) { boutonsMicro }
+        }
+    }
+
+    @ViewBuilder private var boutonsMicro: some View {
+        Button(autorise ? "Vérifier l’accès micro" : "Autoriser le micro") {
+            Task {
+                await conversation.autoriserMicro()
+                autorise = true
+                lireEntrees()
+            }
+        }
+        .buttonStyle(StyleConsole())
+        .fixedSize()
+        .disabled(conversation.essai != .arrete || conversation.enConversation)
+        .accessibilityIdentifier("autoriserMicro")
+        Button(conversation.essai == .arrete ? "Tester le micro" : "Arrêter le test") {
+            Task {
+                await conversation.basculerEssai()
+                lireEntrees()
+            }
+        }
+        .buttonStyle(StyleConsole())
+        .fixedSize()
+        .disabled(conversation.essai == .ouverture || conversation.enConversation || conversation.phase != .repos)
+        .accessibilityIdentifier("testerMicro")
+    }
+
+    /// Le retour de l'essai (`#mic-feedback`) : ce qui se passe, et la barre du signal.
+    private var retourMicro: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(conversation.messageEssai)
+                .font(.footnote)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityIdentifier("messageMicro")
+            JaugeEssai()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Console.caseMesure, in: .rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.trait), lineWidth: 1))
+    }
+
+    // MARK: - les réglages de l'app
+
+    private var compte: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Compte").titreSection().padding(.bottom, 4)
+            LigneEtat("Connecté en tant que", valeur: alfred.moi?.nom ?? "—", mono: false)
+            if !alfred.demo, let hote = alfred.configuration?.relais.hote {
+                LigneEtat("Maison", valeur: hote)
+            }
+            // la démo n'a pas de compte : on la quitte, rien à déconnecter
+            if alfred.demo {
+                Button("Quitter la démonstration") {
+                    Task {
+                        fermer()
+                        await alfred.quitterDemo()
+                    }
+                }
+                .buttonStyle(StyleConsole())
+                .fixedSize()
+                .padding(.top, 12)
+            } else {
+                Button("Se déconnecter", role: .destructive) { confirmer = true }
+                    .buttonStyle(StyleConsole(genre: .alerte))
+                    .fixedSize()
+                    .padding(.top, 12)
+            }
+        }
+    }
+
+    private var voix: some View {
+        @Bindable var conversation = conversation
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Voix").titreSection().padding(.bottom, 4)
+            Toggle(isOn: $conversation.lireReponsesEcrites) {
+                Text("Lire à voix haute les réponses écrites")
+                    .font(.callout)
+                    .foregroundStyle(Color(.texte))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .tint(Color(.faisceau))
+            .frame(minHeight: 44)
+            Text(
+                "Quand vous parlez, Alfred répond à voix haute. Quand vous écrivez, il répond par écrit, sauf si vous activez ce réglage."
+            )
+            .font(.footnote)
+            .foregroundStyle(Color(.texteSecondaire))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var confidentialite: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Confidentialité").titreSection().padding(.bottom, 4)
+            Engagement("Votre voix ne va que vers votre maison, jamais sur internet.", icone: "house")
+            Engagement(
+                "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan.", icone: "mic.slash")
+            Engagement("La conversation n’est pas gardée sur cet appareil.", icone: "trash")
+        }
     }
 }
 
-private struct Separateur: View {
+/// La barre du signal de l'essai (`#mic-test-meter`) : sarcelle, lue à chaque image pendant l'essai seulement.
+private struct JaugeEssai: View {
+    @Environment(Conversation.self) private var conversation
+    @Environment(\.animationsCoupees) private var immobile
+
     var body: some View {
-        Rectangle().fill(Color(.trait).opacity(0.7)).frame(height: 1).accessibilityHidden(true)
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: conversation.essai != .actif || immobile)) { _ in
+            GeometryReader { g in
+                let n = conversation.essai == .actif ? CGFloat(min(1, conversation.niveauEssai * 1.3)) : 0
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Console.jaugeVide)
+                    Capsule().fill(Color(.sarcelle)).frame(width: g.size.width * n)
+                }
+            }
+        }
+        .frame(height: 10)
+        .accessibilityElement()
+        .accessibilityLabel("Signal du microphone testé")
+        .accessibilityValue(
+            conversation.essai == .actif ? "\(Int(min(1, conversation.niveauEssai * 1.3) * 100)) %" : "0 %")
     }
 }
 
-/// Une ligne « libellé · valeur » (la valeur en chiffres fixes, comme les mesures de la console).
-private struct Ligne: View {
-    let libelle: LocalizedStringKey
+/// Une ligne d'état de la console (`#system .stat`) : libellé en capitales, valeur à droite en chiffres fixes, un trait
+/// dessous ; la valeur passe à la ligne si la place manque.
+private struct LigneEtat: View {
+    let libelle: String
     let valeur: String
+    let mono: Bool
 
-    init(_ libelle: LocalizedStringKey, valeur: String) {
+    init(_ libelle: String, valeur: String, mono: Bool = true) {
         self.libelle = libelle
         self.valeur = valeur
+        self.mono = mono
     }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack {
-                Text(libelle).foregroundStyle(Color(.texte))
-                Spacer(minLength: 12)
-                Text(valeur).foregroundStyle(Color(.texteSecondaire))
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(libelle).modifier(EtiquetteEtat())
+                Spacer(minLength: 0)
+                texteValeur
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(libelle).foregroundStyle(Color(.texte))
-                Text(valeur).foregroundStyle(Color(.texteSecondaire))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(libelle).modifier(EtiquetteEtat())
+                texteValeur
             }
         }
-        .font(.callout)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color(.trait)).frame(height: 1).accessibilityHidden(true)
+        }
         .accessibilityElement(children: .combine)
+    }
+
+    private var texteValeur: some View {
+        Text(valeur)
+            .font(mono ? .subheadline.weight(.semibold).monospaced() : .subheadline.weight(.semibold))
+            .foregroundStyle(Color(.texte))
+            .multilineTextAlignment(.trailing)
+            .textSelection(.enabled)
+    }
+}
+
+/// Le libellé d'une ligne d'état : 12 pt, capitales espacées, brume (`.stat .l`).
+private struct EtiquetteEtat: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.caption.weight(.semibold))
+            .tracking(0.85)
+            .textCase(.uppercase)
+            .foregroundStyle(Color(.texteSecondaire))
     }
 }
 
@@ -182,33 +343,10 @@ private struct Engagement: View {
             Image(systemName: icone).foregroundStyle(Color(.faisceau))
         }
         .font(.subheadline)
-        .padding(.vertical, 12)
-    }
-}
-
-/// Une note sous une carte.
-private struct Note: View {
-    let texte: LocalizedStringKey
-    init(_ texte: LocalizedStringKey) { self.texte = texte }
-    var body: some View {
-        Text(texte)
-            .font(.footnote)
-            .foregroundStyle(Color(.texteSecondaire))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 4)
-    }
-}
-
-/// Un bouton-lien dans une carte : texte du faisceau (ou rouge pour une action destructrice), 48 pt de haut.
-private struct StyleLien: ButtonStyle {
-    var alerte = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.callout.weight(.medium))
-            .foregroundStyle(alerte ? Color(.alerte) : Color(.faisceau))
-            .opacity(configuration.isPressed ? 0.6 : 1)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(.rect)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color(.trait).opacity(0.7)).frame(height: 1).accessibilityHidden(true)
+        }
     }
 }

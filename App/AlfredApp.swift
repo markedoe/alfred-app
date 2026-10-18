@@ -31,8 +31,12 @@ struct AlfredApp: App {
                 }
         }
         .onChange(of: phaseScene) { _, phase in
-            // le micro ne reste jamais ouvert écran caché
-            if phase == .background { Task { await alfred.arrierePlan() } }
+            // le micro ne reste jamais ouvert écran caché ; les annexes ne se relisent pas écran caché
+            switch phase {
+            case .background: Task { await alfred.arrierePlan() }
+            case .active: alfred.premierPlan()
+            default: break
+            }
         }
     }
 }

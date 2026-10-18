@@ -22,6 +22,19 @@ protocol MoteurVoix: AnyObject {
     var niveauVoix: Float { get }
     /// Appelé quand iOS interrompt le son (appel, alarme, Siri) : la conversation se ferme.
     var surInterruption: (@MainActor () -> Void)? { get set }
+    /// Les micros de l'appareil (micro intégré, AirPods, micro USB…), dans l'ordre d'iOS.
+    func entrees() -> [EntreeMicro]
+    /// Le micro choisi dans Réglages & état (nil : celui d'iOS), gardé sur l'appareil.
+    var entreeChoisie: String? { get set }
+    /// Le micro choisi n'était plus là à l'ouverture : iOS a repris le sien (la conversation le dit, puis remet à false).
+    var entreeOubliee: Bool { get set }
+}
+
+/// Un micro de l'appareil (la console : un périphérique d'entrée audio).
+struct EntreeMicro: Identifiable, Equatable, Sendable {
+    let uid: String
+    let nom: String
+    var id: String { uid }
 }
 
 /// Le son sur l'appareil.
@@ -38,10 +51,14 @@ final class VoixSysteme: MoteurVoix {
     private var micOuvert = false
     private let journal = Logger(subsystem: "io.github.markedoe.alfred", category: "voix")
     var surInterruption: (@MainActor () -> Void)?
+    var entreeOubliee = false
     private var observateur: (any NSObjectProtocol)?
+    private let reglages: UserDefaults
+    static let cleEntree = "micro.entree"
 
-    init(acces: AccesURLSession) {
+    init(acces: AccesURLSession, reglages: UserDefaults = .standard) {
         self.acces = acces
+        self.reglages = reglages
         observateur = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main
         ) { [weak self] note in
@@ -74,9 +91,35 @@ final class VoixSysteme: MoteurVoix {
         }
     }
 
+    var entreeChoisie: String? {
+        get { reglages.string(forKey: Self.cleEntree) }
+        set { reglages.set(newValue, forKey: Self.cleEntree) }
+    }
+
+    /// La liste d'iOS (la catégorie « enregistrement » est posée sans activer la session : la musique continue).
+    func entrees() -> [EntreeMicro] {
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playAndRecord {
+            try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        }
+        return (session.availableInputs ?? []).map { EntreeMicro(uid: $0.uid, nom: $0.portName) }
+    }
+
     func ouvrirMicro() throws -> AsyncStream<[Float]> {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        // le micro choisi, s'il est encore là ; sinon celui d'iOS, et le choix périmé est oublié (comme la console)
+        if let uid = entreeChoisie {
+            if let port = session.availableInputs?.first(where: { $0.uid == uid }) {
+                try? session.setPreferredInput(port)
+            } else {
+                entreeChoisie = nil
+                entreeOubliee = true
+                try? session.setPreferredInput(nil)
+            }
+        } else {
+            try? session.setPreferredInput(nil)
+        }
         try session.setActive(true)
         let flux = try capture.demarrer()
         lecteurConversation = LecteurVoix(moteur: capture.moteur, possedeMoteur: false)
@@ -148,6 +191,11 @@ final class VoixMuette: MoteurVoix {
     private(set) var lues: [String] = []
     private(set) var accueils = 0
     var surInterruption: (@MainActor () -> Void)?
+    var entreeChoisie: String?
+    var entreeOubliee = false
+
+    /// Un seul micro, générique (la démo n'en ouvre aucun).
+    func entrees() -> [EntreeMicro] { [EntreeMicro(uid: "demo", nom: "Micro de l’appareil")] }
 
     func autoriserMicro() async -> Bool { true }
 

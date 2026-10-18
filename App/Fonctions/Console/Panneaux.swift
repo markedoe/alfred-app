@@ -39,12 +39,20 @@ struct PanneauAlfred: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Assistant personnel").titreSection()
                 .padding(.bottom, 16)
+            if alfred.modeInvites {
+                Text("Mode invités : l’historique est masqué.")
+                    .font(.caption)
+                    .foregroundStyle(Color(.champagne))
+                    .padding(.bottom, 8)
+                    .accessibilityIdentifier("modeInvites")
+            }
             Text(briefing)
                 .font(.title.weight(.bold))
                 .foregroundStyle(Color(.glace))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 12)
                 .contentTransition(.opacity)
+                .masqueInvites(alfred.modeInvites)
                 .accessibilityIdentifier("briefing")
             Text(alfred.resume)
                 .font(.subheadline)
@@ -52,27 +60,11 @@ struct PanneauAlfred: View {
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 20)
+                .masqueInvites(alfred.modeInvites)
                 .accessibilityIdentifier("resume")
             Rectangle().fill(Color(.trait)).frame(height: 1).padding(.bottom, 20).accessibilityHidden(true)
-            HStack(spacing: 12) {
-                Text("Échanges").titreSection()
-                if !conversation.vide {
-                    Button {
-                        Task { await conversation.nouvelle() }
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(Color(.glace))
-                            .frame(width: 44, height: 44)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Nouvelle conversation")
-                    .accessibilityIdentifier("nouvelle")
-                }
-            }
-            .frame(minHeight: 44)
-            .padding(.bottom, 8)
+            Text("Échanges").titreSection()
+                .padding(.bottom, 16)
         }
     }
 
@@ -91,9 +83,14 @@ struct PanneauAlfred: View {
 
 /// Les échanges : VOUS (sarcelle) et ALFRED (champagne), ce qu'il a fait ; le panneau suit la dernière réponse.
 private struct Echanges: View {
+    @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
 
     var body: some View {
+        contenu.masqueInvites(alfred.modeInvites)
+    }
+
+    @ViewBuilder private var contenu: some View {
         if conversation.vide {
             Text("Votre conversation apparaîtra ici. Touchez « Parler » ou écrivez à Alfred.")
                 .font(.callout)
@@ -124,8 +121,8 @@ private struct MessageConsole: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(alfred ? "Alfred" : "Vous")
                 .etiquette(alfred ? Color(.champagne) : Color(.sarcelle), espacement: 1.1)
-            if !message.outils.isEmpty {
-                Outils(outils: message.outils)
+            if alfred {
+                DetailsTechniques(outils: message.outils)
             }
             if message.texte.isEmpty, message.enCours {
                 Text("▌")
@@ -140,10 +137,8 @@ private struct MessageConsole: View {
                     .textSelection(.enabled)
                     .contentTransition(.opacity)
             }
-            if message.comprisLocalement, !message.enCours {
-                Text("Compris par la maison, sans le modèle")
-                    .font(.caption)
-                    .foregroundStyle(Color(.texteSecondaire))
+            if alfred, let duree = message.duree, !message.enCours {
+                Badges(duree: duree, local: message.comprisLocalement, outils: message.outils.count)
             }
         }
         .padding(.leading, alfred ? 12 : 0)
@@ -157,37 +152,96 @@ private struct MessageConsole: View {
     }
 }
 
-/// Ce qu'Alfred a fait, en petites étiquettes mono : en cours, fait, échoué (jamais le contenu d'un résultat).
-private struct Outils: View {
+/// « Détails techniques » (la console : un `<details>` replié) : chaque outil appelé, son nom court, ses arguments et son
+/// état (… en cours, ✓ fait, ✕ échec), bordé du faisceau, de la sarcelle ou du rouge. Jamais le contenu d'un résultat.
+private struct DetailsTechniques: View {
     let outils: [Conversation.Outil]
+    @State private var ouverts = false
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) { etiquettes }
-            VStack(alignment: .leading, spacing: 6) { etiquettes }
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                ouverts.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrowtriangle.right.fill")
+                        .font(.system(size: 8))
+                        .rotationEffect(.degrees(ouverts ? 90 : 0))
+                    Text("Détails techniques")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(.texteSecondaire))
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Détails techniques")
+            .accessibilityValue(ouverts ? "ouverts" : "repliés")
+            .accessibilityHint(outils.isEmpty ? "Aucun outil" : "\(outils.count) outil\(outils.count > 1 ? "s" : "")")
+            if ouverts {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(outils) { LigneOutil(outil: $0) }
+                }
+            }
         }
     }
+}
 
-    @ViewBuilder private var etiquettes: some View {
-        ForEach(outils) { o in
-            HStack(spacing: 6) {
-                switch o.etat {
-                case .enCours: ProgressView().controlSize(.mini).tint(Color(.sodium))
-                case .fait: Image(systemName: "checkmark").foregroundStyle(Color(.sarcelle))
-                case .echec: Image(systemName: "xmark").foregroundStyle(Color(.alerte))
-                }
-                Text(o.libelle)
-            }
-            .font(.caption.weight(.semibold).monospaced())
-            .foregroundStyle(Color(.texte))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Console.caseMesure, in: .rect(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.trait), lineWidth: 1))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                o.libelle + ", " + (o.etat == .enCours ? "en cours" : o.etat == .fait ? "fait" : "échec"))
+private struct LigneOutil: View {
+    let outil: Conversation.Outil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(outil.nom).foregroundStyle(Color(.texte))
+            Text(outil.arguments)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            Text(outil.etat == .enCours ? "…" : outil.etat == .fait ? "✓" : "✕")
+                .foregroundStyle(Color(.texte))
         }
+        .font(.caption.monospaced())
+        .padding(6)
+        .background(Color(.faisceau).opacity(0.045))
+        .overlay(alignment: .leading) { Rectangle().fill(bord).frame(width: 2) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(outil.nom + (outil.arguments.isEmpty ? "" : ", " + outil.arguments))
+        .accessibilityValue(outil.etat == .enCours ? "en cours" : outil.etat == .fait ? "fait" : "échec")
+    }
+
+    private var bord: Color {
+        switch outil.etat {
+        case .enCours: Color(.faisceau)
+        case .fait: Color(.sarcelle)
+        case .echec: Color(.alerte)
+        }
+    }
+}
+
+/// Les badges sous une réponse (`.meta`) : sa durée, « intent local » ou « llm », le nombre d'outils.
+private struct Badges: View {
+    let duree: Double
+    let local: Bool
+    let outils: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            badge(FenetreReglages.duree(duree))
+            badge(local ? "intent local" : "llm")
+            if outils > 0 { badge("\(outils) outil\(outils > 1 ? "s" : "")") }
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func badge(_ texte: String) -> some View {
+        Text(texte)
+            .font(.caption2)
+            .foregroundStyle(Color(.texteSecondaire))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(.trait), lineWidth: 1))
     }
 }
 
@@ -197,6 +251,9 @@ private struct Outils: View {
 struct PanneauEnvironnement: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
+    @Environment(\.dynamicTypeSize) private var tailleTexte
+    /// La disposition large montre l'état des services sous les jauges, pas ici.
+    var large = false
     @ScaledMetric(relativeTo: .subheadline) private var colonneHumidite: CGFloat = 40
     /// 46 pt comme la console, avec la taille du texte, plafonnée (« 14.5°C » tient sur une ligne).
     @ScaledMetric(relativeTo: .largeTitle) private var tailleMesuree: CGFloat = 46
@@ -218,6 +275,11 @@ struct PanneauEnvironnement: View {
                             .padding(.top, 24)
                             .padding(.bottom, 16)
                         energie
+                    }
+                    if !large {
+                        // sur téléphone et iPad à la verticale, l'état des services est au bas de ce panneau
+                        PastillesEtat()
+                            .padding(.top, 12)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,19 +351,29 @@ struct PanneauEnvironnement: View {
         } else {
             VStack(spacing: 4) {
                 ForEach(pieces) { p in
-                    HStack(spacing: 10) {
+                    // aux tailles d'accessibilité, les valeurs passent sous le nom (qui n'est jamais coupé au milieu)
+                    let empile = tailleTexte.isAccessibilitySize
+                    let disposition =
+                        empile
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                        : AnyLayout(HStackLayout(spacing: 10))
+                    disposition {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(p.nom).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.texte))
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(p.etage).font(.caption.weight(.semibold)).foregroundStyle(Color(.texteSecondaire))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(Format.valeur(p.temperature, "°", 1))
-                            .font(.subheadline.weight(.semibold).monospaced())
-                            .foregroundStyle(Color(.texte))
-                        Text(Format.valeur(p.humidite, "%"))
-                            .font(.subheadline.weight(.semibold).monospaced())
-                            .foregroundStyle(Color(.texteSecondaire))
-                            .frame(minWidth: colonneHumidite, alignment: .trailing)
+                        HStack(spacing: 10) {
+                            Text(Format.valeur(p.temperature, "°", 1))
+                                .font(.subheadline.weight(.semibold).monospaced())
+                                .foregroundStyle(Color(.texte))
+                            Text(Format.valeur(p.humidite, "%"))
+                                .font(.subheadline.weight(.semibold).monospaced())
+                                .foregroundStyle(Color(.texteSecondaire))
+                                .frame(minWidth: empile ? nil : colonneHumidite, alignment: .trailing)
+                        }
+                        .fixedSize()
                     }
                     .frame(minHeight: 44)
                     .accessibilityElement(children: .ignore)
@@ -353,5 +425,135 @@ struct PanneauEnvironnement: View {
                 .accessibilityElement(children: .combine)
             }
         }
+    }
+}
+
+// MARK: - état des services
+
+/// Les pastilles de l'état des services (`.etat-services`, Uptime Kuma lu par le relais) : un groupe par nom court
+/// (MAISON, VOIX, CABINET, NUIT), une pastille par service, vert en service, sodium en attente, rouge en panne, gris
+/// éteint (normal) ou pas encore mesuré. Un toucher ouvre l'historique dans Safari, si le relais en donne l'adresse.
+struct PastillesEtat: View {
+    @Environment(Alfred.self) private var alfred
+    @Environment(\.openURL) private var ouvrir
+
+    var body: some View {
+        if let etat = alfred.annexes?.etat, !etat.groupes.isEmpty {
+            let contenu = FluxPastilles(espacement: 14, interligne: 4) {
+                ForEach(etat.groupes) { g in
+                    HStack(spacing: 4) {
+                        Text(g.nomCourt)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.8)
+                            .textCase(.uppercase)
+                            .foregroundStyle(Color(.texteSecondaire))
+                            .padding(.trailing, 2)
+                        ForEach(g.services) { s in
+                            Circle()
+                                .fill(Self.couleur(s.statut))
+                                .opacity(Self.opacite(s.statut))
+                                .frame(width: 9, height: 9)
+                                .shadow(color: s.statut == "panne" ? Self.rouge : .clear, radius: 3)
+                        }
+                    }
+                    .fixedSize()
+                }
+            }
+            .dynamicTypeSize(...DynamicTypeSize.large)
+            Group {
+                if let kuma = etat.kuma {
+                    Button {
+                        ouvrir(kuma)
+                    } label: {
+                        contenu.frame(minHeight: 44).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Historique dans Uptime Kuma")
+                } else {
+                    contenu
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("État des services")
+            .accessibilityValue(Self.resume(etat))
+            .accessibilityIdentifier("etatServices")
+        }
+    }
+
+    static let vert = Color(red: 62 / 255, green: 207 / 255, blue: 142 / 255)
+    static let rouge = Color(red: 1, green: 84 / 255, blue: 112 / 255)
+
+    static func couleur(_ statut: String) -> Color {
+        switch statut {
+        case "ok": vert
+        case "attente": Color(.sodium)
+        case "panne": rouge
+        default: Color(.texteSecondaire)
+        }
+    }
+
+    static func opacite(_ statut: String) -> Double {
+        switch statut {
+        case "ok", "attente", "panne": 1
+        case "eteint", "inconnu": 0.45
+        default: 0.55
+        }
+    }
+
+    /// Pour VoiceOver : les services qui ne sont pas en service, nommés ; sinon « tout est en service ».
+    static func resume(_ e: EtatServices) -> String {
+        let autres = e.groupes.flatMap(\.services).filter { $0.statut != "ok" }
+        guard !autres.isEmpty else { return "tout est en service" }
+        return autres.map { "\($0.nom) : \($0.mot)" }.joined(separator: " ; ")
+    }
+}
+
+/// Une disposition qui passe à la ligne (les groupes de pastilles, comme le `flex-wrap` de la console).
+struct FluxPastilles: Layout {
+    var espacement: CGFloat
+    var interligne: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lignes = ranger(subviews, largeur: proposal.width ?? .infinity)
+        let largeur = lignes.map(\.largeur).max() ?? 0
+        let hauteur = lignes.map(\.hauteur).reduce(0, +) + interligne * CGFloat(max(0, lignes.count - 1))
+        return CGSize(width: largeur, height: hauteur)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for ligne in ranger(subviews, largeur: bounds.width) {
+            var x = bounds.minX
+            for i in ligne.indices {
+                let t = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y + (ligne.hauteur - t.height) / 2), proposal: .unspecified)
+                x += t.width + espacement
+            }
+            y += ligne.hauteur + interligne
+        }
+    }
+
+    private struct Ligne {
+        var indices: [Int] = []
+        var largeur: CGFloat = 0
+        var hauteur: CGFloat = 0
+    }
+
+    private func ranger(_ subviews: Subviews, largeur: CGFloat) -> [Ligne] {
+        var lignes: [Ligne] = []
+        var l = Ligne()
+        for (i, v) in subviews.enumerated() {
+            let t = v.sizeThatFits(.unspecified)
+            let ajout = l.indices.isEmpty ? t.width : l.largeur + espacement + t.width
+            if !l.indices.isEmpty, ajout > largeur {
+                lignes.append(l)
+                l = Ligne()
+            }
+            l.largeur = l.indices.isEmpty ? t.width : l.largeur + espacement + t.width
+            l.hauteur = max(l.hauteur, t.height)
+            l.indices.append(i)
+        }
+        if !l.indices.isEmpty { lignes.append(l) }
+        return lignes
     }
 }

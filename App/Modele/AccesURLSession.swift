@@ -56,6 +56,24 @@ final class AccesURLSession: NSObject, AccesRelais, URLSessionDelegate, @uncheck
         return ((reponse as? HTTPURLResponse)?.statusCode ?? 0, corps)
     }
 
+    /// POST ou DELETE (documents, notifications), avec l'origine du relais comme la console (le relais refuse une
+    /// écriture venue d'une autre page).
+    func envoyer(_ r: RequeteRelais) async throws -> (statut: Int, corps: Data) {
+        var requete = URLRequest(url: relais.url(r.chemin))
+        requete.httpMethod = r.methode.rawValue
+        requete.setValue(relais.base.absoluteString, forHTTPHeaderField: "Origin")
+        if let type = r.type { requete.setValue(type, forHTTPHeaderField: "Content-Type") }
+        // un document de 20 Mo par le VPN : plus que les 15 s d'une lecture
+        if r.corps != nil { requete.timeoutInterval = 120 }
+        let resultat: (Data, URLResponse)
+        if let donnees = r.corps {
+            resultat = try await session.upload(for: requete, from: donnees)
+        } else {
+            resultat = try await session.data(for: requete)
+        }
+        return ((resultat.1 as? HTTPURLResponse)?.statusCode ?? 0, resultat.0)
+    }
+
     /// Les octets d'une ressource du relais, au fil de leur arrivée (la voix d'Alfred se lit pendant sa synthèse).
     func flux(_ chemin: String) async throws -> URLSession.AsyncBytes {
         let (octets, reponse) = try await session.bytes(from: relais.url(chemin))

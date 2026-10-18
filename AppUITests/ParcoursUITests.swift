@@ -3,8 +3,9 @@ import XCTest
 
 /// Les parcours principaux, sur la maison de démonstration (aucun réseau, aucun micro) : écrire à Alfred et lire sa
 /// réponse dans les échanges ; allumer une pièce depuis la roue, l'état affiché étant celui que la maison confirme ;
-/// l'audit d'accessibilité d'Apple sur chaque vue ; la disposition large (iPad à l'horizontale). Des captures sont
-/// jointes au résultat : elles se comparent à celles de la console web (relecture du design).
+/// les fenêtres de l'en-tête (documents, notifications, autres systèmes, réglages) ; l'audit d'accessibilité d'Apple
+/// sur chaque vue et chaque fenêtre ; la disposition large (iPad à l'horizontale). Des captures sont jointes au
+/// résultat : elles se comparent à celles de la console web vue connecté (relecture du design).
 @MainActor
 final class ParcoursUITests: XCTestCase {
     override func setUp() async throws {
@@ -65,10 +66,15 @@ final class ParcoursUITests: XCTestCase {
         bouton(app, "envoyer").tap()
         // comme la console : l'envoi ferme la saisie et montre les échanges
         XCTAssertTrue(app.staticTexts["briefing"].waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, contenant: "Allumer · Cuisine, fait").waitForExistence(timeout: 10))
         XCTAssertTrue(
             element(app, contenant: "C’est fait : j’ai allumé la pièce Cuisine.").waitForExistence(timeout: 10))
+        // les badges de la console sous la réponse : sa durée, « llm », le nombre d'outils
+        XCTAssertTrue(element(app, contenant: "1 outil").waitForExistence(timeout: 5))
         capturer(app, "2-alfred-echanges")
+        // « Détails techniques », replié comme dans la console : l'outil, ses arguments, fait
+        app.buttons["Détails techniques"].firstMatch.tap()
+        XCTAssertTrue(element(app, contenant: "HassTurnOn, Cuisine").waitForExistence(timeout: 5))
+        capturer(app, "2b-details-techniques")
         vue(app, "environnement")
         XCTAssertTrue(element(app, contenant: "Extérieur").waitForExistence(timeout: 5))
         capturer(app, "3-environnement")
@@ -99,7 +105,54 @@ final class ParcoursUITests: XCTestCase {
     func testAccessibilite() throws {
         let app = lancer()
         attendrePret(app)
-        try auditerEcrans(app, ["Pièces", "Alfred", "Environnement", "Réglages"])
+        try auditerEcrans(app, ["Pièces", "Alfred", "Environnement", "Documents", "Notifications", "Réglages"])
+    }
+
+    /// Les fenêtres de l'en-tête, comme la console connectée : les documents déposés, les notifications (marquées lues
+    /// à l'ouverture), les autres systèmes, les réglages et l'état de la maison.
+    func testFenetresDeLEnTete() throws {
+        let app = lancer()
+        attendrePret(app)
+        let fermer = bouton(app, "fermerFenetre")
+
+        let documents = bouton(app, "documents")
+        XCTAssertTrue(documents.waitForExistence(timeout: 10))
+        XCTAssertTrue(documents.label.contains("1 déposé"), documents.label)
+        documents.tap()
+        XCTAssertTrue(element(app, contenant: "Facture d’exemple").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, contenant: "Déposer un document").exists)
+        capturer(app, "6-documents")
+        fermer.tap()
+
+        let notifications = bouton(app, "notifications")
+        XCTAssertTrue(notifications.waitForExistence(timeout: 10))
+        XCTAssertTrue(notifications.label.contains("1 non lue"), notifications.label)
+        notifications.tap()
+        XCTAssertTrue(element(app, contenant: "la lessive est terminée").waitForExistence(timeout: 5))
+        capturer(app, "7-notifications")
+        fermer.tap()
+        // lues à l'ouverture : le compteur disparaît
+        let lues = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "Notifications"), object: notifications)
+        XCTAssertEqual(XCTWaiter().wait(for: [lues], timeout: 20), .completed, "notifications non marquées lues")
+
+        bouton(app, "liens").tap()
+        XCTAssertTrue(element(app, contenant: "Paperless").waitForExistence(timeout: 5))
+        capturer(app, "8-autres-systemes")
+        // un toucher ailleurs referme la liste
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
+        XCTAssertFalse(element(app, contenant: "Paperless").waitForExistence(timeout: 1))
+
+        bouton(app, "reglages").tap()
+        XCTAssertTrue(element(app, contenant: "demo").waitForExistence(timeout: 5), "le modèle du pipeline")
+        XCTAssertTrue(element(app, contenant: "Tester le micro").exists)
+        capturer(app, "9-reglages")
+        fermer.tap()
+
+        vue(app, "environnement")
+        app.swipeUp()
+        XCTAssertTrue(app.descendants(matching: .any)["etatServices"].waitForExistence(timeout: 5))
+        capturer(app, "10-etat-des-services")
     }
 
     /// La disposition large de la console (iPad à l'horizontale, Mac) : l'assistant, la roue, l'environnement et le
@@ -163,9 +216,9 @@ final class ParcoursUITests: XCTestCase {
             capturer(app, "grand-texte-4-environnement-suite")
         }
         bouton(app, "reglages").tap()
-        let compte = element(app, contenant: "Connecté en tant que")
-        XCTAssertTrue(compte.waitForExistence(timeout: 5))
-        h["Connecté en tant que"] = compte.frame.height
+        let modele = element(app, contenant: "Modèle")
+        XCTAssertTrue(modele.waitForExistence(timeout: 5))
+        h["Modèle"] = modele.frame.height
         if captures {
             capturer(app, "grand-texte-5-reglages")
             app.swipeUp()
@@ -208,12 +261,15 @@ final class ParcoursUITests: XCTestCase {
         var problemes: [String] = []
         var ecartes: [String] = []
         for ecran in ecrans {
+            // une fenêtre restée ouverte (l'écran d'avant) se ferme d'abord
+            if bouton(app, "fermerFenetre").exists { bouton(app, "fermerFenetre").tap() }
             switch ecran {
             case "Alfred": vue(app, "alfred")
             case "Environnement": vue(app, "environnement")
-            case "Réglages":
-                bouton(app, "reglages").tap()
-                XCTAssertTrue(app.navigationBars["Réglages & état"].waitForExistence(timeout: 5))
+            case "Documents", "Notifications", "Réglages":
+                vue(app, "pieces")
+                bouton(app, ["Documents": "documents", "Notifications": "notifications"][ecran] ?? "reglages").tap()
+                XCTAssertTrue(bouton(app, "fermerFenetre").waitForExistence(timeout: 5))
             default: vue(app, "pieces")
             }
             try app.performAccessibilityAudit(for: types) { probleme in

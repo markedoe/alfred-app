@@ -12,7 +12,12 @@ struct ConsoleVue: View {
     @State private var vue = VueConsole.pieces
     @State private var choisi: String?
     @State private var ecrire = false
-    @State private var reglages = false
+    @State private var fenetre: FenetreConsole?
+    @State private var liensOuverts = false
+    /// Les panneaux de côté de la disposition large, masqués par leur poignée (choix gardé sur l'appareil, comme la
+    /// console le garde dans le navigateur).
+    @AppStorage("console.assistantMasque") private var assistantMasque = false
+    @AppStorage("console.environnementMasque") private var environnementMasque = false
     /// Le démarrage de la console (2,4 s), joué une fois par ouverture.
     @State private var debut = Date.now
 
@@ -34,7 +39,8 @@ struct ConsoleVue: View {
             ZStack(alignment: .bottom) {
                 Console.fond
                 VStack(spacing: 0) {
-                    EnTeteConsole(texteLien: geo.size.width >= 600, large: large, reglages: $reglages)
+                    EnTeteConsole(largeur: geo.size.width, fenetre: $fenetre, liensOuverts: $liensOuverts)
+                        .zIndex(1)
                     Group {
                         if large {
                             dispositionLarge(geo.size)
@@ -43,7 +49,9 @@ struct ConsoleVue: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    BasConsole(large: large, jauges: geo.size.height >= 640 || large, ecrire: $ecrire)
+                    BasConsole(
+                        large: large, jauges: geo.size.height >= 640 || large, ecrire: $ecrire,
+                        raccourcis: fenetre == nil && !liensOuverts)
                     if !large {
                         NavConsole(vue: $vue)
                     }
@@ -62,9 +70,43 @@ struct ConsoleVue: View {
                 AvisConsole()
                     .padding(.top, 84)
             }
+            .overlay(alignment: .topTrailing) {
+                if liensOuverts {
+                    ZStack(alignment: .topTrailing) {
+                        // un toucher ailleurs referme la liste (la console : un clic ailleurs)
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .onTapGesture { liensOuverts = false }
+                            .accessibilityHidden(true)
+                        ListeLiens(ouverte: $liensOuverts)
+                            .padding(.top, geo.size.width > 560 ? 70 : 62)
+                            .padding(.trailing, 12)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .overlay {
+                if let f = fenetre {
+                    Group {
+                        switch f {
+                        case .documents: FenetreDocuments { fenetre = nil }
+                        case .notifications: FenetreNotifications { fenetre = nil }
+                        case .reglages: FenetreReglages { fenetre = nil }
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .onChange(of: fenetre) { _, f in
+                if f != nil {
+                    liensOuverts = false
+                    ecrire = false
+                }
+            }
         }
         .animation(.smooth(duration: 0.25), value: ecrire)
-        .sheet(isPresented: $reglages) { ReglagesVue() }
+        .animation(.smooth(duration: 0.2), value: fenetre)
+        .animation(.smooth(duration: 0.15), value: liensOuverts)
         .sensoryFeedback(trigger: conversation.enConversation) { _, ouvert in ouvert ? .start : .stop }
         .sensoryFeedback(.success, trigger: conversation.reponses)
         .sensoryFeedback(trigger: alfred.dernierRetour) { _, retour in
@@ -92,19 +134,33 @@ struct ConsoleVue: View {
     }
 
     private func dispositionLarge(_ taille: CGSize) -> some View {
-        // la console : 310 et 330 pt ; 270 et 300 jusqu'à 1350 pt de large
+        // la console : 310 et 330 pt ; 270 et 300 jusqu'à 1350 pt de large ; un panneau masqué rend sa place à la roue
         let etroit = taille.width <= 1350
         return HStack(spacing: 0) {
-            PanneauAlfred()
-                .frame(width: etroit ? 270 : 310)
-                .padding(.vertical, etroit ? 12 : 16)
-                .padding(.horizontal, etroit ? 8 : 12)
+            if !assistantMasque {
+                PanneauAlfred()
+                    .padding(.vertical, etroit ? 12 : 16)
+                    .padding(.horizontal, etroit ? 8 : 12)
+                    .frame(width: (etroit ? 270 : 310))
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             VuePieces(choisi: $choisi, compact: false, debut: debut)
-            PanneauEnvironnement()
-                .frame(width: etroit ? 300 : 330)
-                .padding(.vertical, etroit ? 12 : 16)
-                .padding(.horizontal, etroit ? 8 : 12)
+                .overlay(alignment: .leading) {
+                    PoigneePanneau(cote: .assistant, masque: $assistantMasque)
+                }
+                .overlay(alignment: .trailing) {
+                    PoigneePanneau(cote: .environnement, masque: $environnementMasque)
+                }
+            if !environnementMasque {
+                PanneauEnvironnement(large: true)
+                    .padding(.vertical, etroit ? 12 : 16)
+                    .padding(.horizontal, etroit ? 8 : 12)
+                    .frame(width: (etroit ? 300 : 330))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(.smooth(duration: 0.3), value: assistantMasque)
+        .animation(.smooth(duration: 0.3), value: environnementMasque)
     }
 }
 
@@ -131,10 +187,10 @@ struct VuePieces: View {
                 }
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 if let s = alfred.secteurs.first(where: { $0.id == choisi }) {
-                    CartePiece(secteur: s) { choisi = nil }
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 8)
-                        .frame(maxWidth: compact ? .infinity : 560)
+                    // la console : sur toute la largeur de la roue, 16 pt des bords en disposition large
+                    CartePiece(secteur: s, large: !compact) { choisi = nil }
+                        .padding(.horizontal, compact ? 12 : 16)
+                        .padding(.bottom, compact ? 8 : 16)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -146,126 +202,6 @@ struct VuePieces: View {
                     .font(.callout)
                     .foregroundStyle(Color(.texteSecondaire))
             }
-        }
-    }
-}
-
-// MARK: - en-tête
-
-/// L'en-tête de la console : ALFRED / MANOR COMMAND, le lien avec la maison, les réglages et le compte.
-struct EnTeteConsole: View {
-    @Environment(Alfred.self) private var alfred
-    let texteLien: Bool
-    let large: Bool
-    @Binding var reglages: Bool
-    @State private var quitter = false
-
-    var body: some View {
-        HStack(spacing: large ? 20 : 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("ALFRED")
-                    .font(.title2.weight(.heavy))
-                    .tracking(6)
-                    .foregroundStyle(Color(.glace))
-                Text("MANOR COMMAND")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(1.6)
-                    .foregroundStyle(Color(.champagne))
-            }
-            // la marque ne se resserre jamais : c'est l'espace entre elle et les boutons qui cède
-            .fixedSize()
-            .layoutPriority(1)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Alfred")
-            .accessibilityAddTraits(.isHeader)
-            if large {
-                Rectangle().fill(Color(.trait)).frame(width: 1, height: 24).accessibilityHidden(true)
-            }
-            Lien(texte: texteLien, etiquette: large)
-            Spacer(minLength: 8)
-            Button {
-                reglages = true
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(StyleIcone())
-            .accessibilityLabel("Réglages")
-            .accessibilityIdentifier("reglages")
-            Button {
-                quitter = true
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-            }
-            .buttonStyle(StyleIcone())
-            .accessibilityLabel(alfred.demo ? "Quitter la démonstration" : "Se déconnecter")
-            .accessibilityIdentifier("compte")
-            .confirmationDialog(
-                alfred.demo ? "Quitter la démonstration ?" : "Se déconnecter de la maison ?", isPresented: $quitter,
-                titleVisibility: .visible
-            ) {
-                Button(alfred.demo ? "Quitter" : "Se déconnecter", role: .destructive) {
-                    Task {
-                        if alfred.demo {
-                            await alfred.quitterDemo()
-                        } else {
-                            await alfred.seDeconnecter()
-                        }
-                    }
-                }
-            } message: {
-                if !alfred.demo {
-                    Text(
-                        "La connexion de cet appareil est supprimée dans Home Assistant. Vous pourrez vous reconnecter."
-                    )
-                }
-            }
-        }
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .padding(.horizontal, large ? 24 : 16)
-        .frame(minHeight: 72)
-        .background(Console.bandeau.opacity(0.95).ignoresSafeArea(edges: .top))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(.trait)).frame(height: 2).accessibilityHidden(true)
-        }
-    }
-}
-
-/// Le lien avec la maison : une pastille sarcelle (connecté) ou sodium, et son état en clair sur les grands écrans.
-private struct Lien: View {
-    @Environment(Alfred.self) private var alfred
-    let texte: Bool
-    let etiquette: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if etiquette {
-                Text("Lien").etiquette(Color(.texteSecondaire), espacement: 0.8)
-            }
-            HStack(spacing: 8) {
-                Circle().fill(couleur).frame(width: 9, height: 9)
-                if texte {
-                    Text(mot)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(couleur)
-                }
-            }
-        }
-        .frame(minWidth: 44, minHeight: 44)
-        .contentShape(.rect)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Lien avec la maison")
-        .accessibilityValue(mot)
-        .accessibilityIdentifier("lien")
-    }
-
-    private var couleur: Color { alfred.estPret ? Color(.sarcelle) : Color(.sodium) }
-
-    private var mot: String {
-        switch alfred.liaison {
-        case .pret: "Connecté"
-        case .connexion, .synchronisation: "Connexion…"
-        case .deconnecte: "Déconnecté"
-        case .fatal: "Refusé"
         }
     }
 }
@@ -341,12 +277,20 @@ struct BasConsole: View {
     let large: Bool
     let jauges: Bool
     @Binding var ecrire: Bool
+    /// Les raccourcis du clavier (espace pour parler, / pour écrire), coupés quand une fenêtre ou la saisie est
+    /// ouverte (comme la console : « des raccourcis qui respectent les champs »).
+    let raccourcis: Bool
 
     var body: some View {
         Group {
             if large {
                 HStack(alignment: .center, spacing: 24) {
-                    Jauges()
+                    // la console : les pastilles de l'état des services sous les jauges
+                    VStack(alignment: .leading, spacing: 10) {
+                        Jauges()
+                        PastillesEtat()
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
                     Consommation()
                         .frame(minWidth: 100, maxWidth: .infinity)
                     voix
@@ -382,11 +326,13 @@ struct BasConsole: View {
                 }
                 .buttonStyle(StyleConsole(genre: conversation.enConversation ? .session : .principal))
                 .disabled(!peutParler)
+                .keyboardShortcut(raccourcis && !ecrire ? KeyboardShortcut(.space, modifiers: []) : nil)
                 .accessibilityLabel(conversation.enConversation ? "Terminer la conversation" : libelleParler)
                 .accessibilityIdentifier("parler")
                 Button("Écrire") { ecrire.toggle() }
                     .buttonStyle(StyleConsole())
                     .disabled(conversation.enConversation)
+                    .keyboardShortcut(raccourcis && !ecrire ? KeyboardShortcut("/", modifiers: []) : nil)
                     .accessibilityAddTraits(ecrire ? .isSelected : [])
                     .accessibilityIdentifier("ecrire")
             }
@@ -406,7 +352,7 @@ struct BasConsole: View {
 
     private var peutParler: Bool {
         if conversation.enConversation { return true }
-        return alfred.estPret && conversation.phase != .reflexion
+        return alfred.estPret && conversation.phase != .reflexion && conversation.essai == .arrete
     }
 
     private var libelleParler: String {
@@ -622,10 +568,12 @@ struct SaisieConsole: View {
 
 // MARK: - la pièce choisie
 
-/// La carte de la pièce choisie (`#room-card`) : son nom, l'état de sa lumière, ses mesures, et un seul bouton.
+/// La carte de la pièce choisie (`#room-card`) : son nom, l'état de sa lumière, ses mesures, et un seul bouton ; en
+/// disposition large, le bouton se range à droite des mesures (la console : une grille à deux colonnes).
 struct CartePiece: View {
     @Environment(Alfred.self) private var alfred
     let secteur: Secteur
+    var large = false
     let fermer: () -> Void
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduire
@@ -651,21 +599,24 @@ struct CartePiece: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Color(.glace))
                         .frame(width: 44, height: 44)
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.acier), lineWidth: 1.5))
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Fermer la pièce")
             }
-            HStack(alignment: .top, spacing: 18) {
-                mesure("Température", secteur.temperature)
-                mesure("Humidité", secteur.humidite)
-                mesure("COV", secteur.air)
+            if large {
+                HStack(alignment: .bottom, spacing: 16) {
+                    mesures
+                    Spacer(minLength: 0)
+                    action(attente)
+                        .frame(minWidth: 110)
+                        .fixedSize()
+                }
+            } else {
+                mesures
+                action(attente)
             }
-            Button(secteur.allumee ? "Éteindre" : "Allumer") { alfred.basculer(secteur) }
-                .buttonStyle(StyleConsole(genre: .principal))
-                .disabled(attente || !secteur.disponible)
-                .opacity(attente && pulse ? 0.6 : 1)
-                .accessibilityIdentifier("actionPiece")
         }
         .padding(18)
         .background(Console.carte, in: .rect(cornerRadius: 12))
@@ -682,16 +633,34 @@ struct CartePiece: View {
         .accessibilityIdentifier("cartePiece")
     }
 
+    /// Température, humidité, COV : 22 pt en chiffres fixes (20 sur téléphone), 24 pt d'écart (18).
+    private var mesures: some View {
+        HStack(alignment: .top, spacing: large ? 24 : 18) {
+            mesure("Température", secteur.temperature)
+            mesure("Humidité", secteur.humidite)
+            mesure("COV", secteur.air)
+        }
+    }
+
+    /// Le bouton de la console (`#room-action`) : un bouton ordinaire, bordé du faisceau.
+    private func action(_ attente: Bool) -> some View {
+        Button(secteur.allumee ? "Éteindre" : "Allumer") { alfred.basculer(secteur) }
+            .buttonStyle(StyleConsole(genre: .piece))
+            .disabled(attente || !secteur.disponible)
+            .opacity(attente && pulse ? 0.6 : 1)
+            .accessibilityIdentifier("actionPiece")
+    }
+
     private func etat(_ attente: Bool) -> String {
         if attente { return "Commande envoyée · confirmation attendue" }
         return secteur.allumee ? "Lumière allumée" : secteur.disponible ? "Lumière éteinte" : "Lumière indisponible"
     }
 
     private func mesure(_ libelle: String, _ m: Mesure?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(libelle).font(.caption).foregroundStyle(Color(.texteSecondaire))
+        VStack(alignment: .leading, spacing: 5) {
+            Text(libelle).font(.caption.weight(.medium)).foregroundStyle(Color(.texteSecondaire))
             Text(Format.valeur(m?.valeur, m?.unite ?? "", 1))
-                .font(.title3.weight(.semibold).monospaced())
+                .font((large ? Font.title2 : .title3).weight(.semibold).monospaced())
                 .foregroundStyle(Color(.texte))
         }
         .accessibilityElement(children: .combine)
@@ -755,5 +724,61 @@ private struct AvisConsole: View {
             try? await Task.sleep(for: .seconds(2.6))
             if affiche?.id == id { affiche = nil }
         }
+    }
+}
+
+// MARK: - poignées des panneaux (disposition large)
+
+/// La poignée d'un panneau de côté (`#assistant-toggle`, `#environment-toggle`) : 28 × 88 pt, accrochée au bord du
+/// panneau, deux traits et un chevron champagne ; elle masque le panneau (la roue prend sa place) ou le rend.
+struct PoigneePanneau: View {
+    enum Cote { case assistant, environnement }
+    let cote: Cote
+    @Binding var masque: Bool
+
+    var body: some View {
+        Button {
+            masque.toggle()
+        } label: {
+            VStack(spacing: 10) {
+                VStack(spacing: 2) {
+                    Rectangle().frame(width: 12, height: 2)
+                    Rectangle().frame(width: 12, height: 2)
+                }
+                .opacity(0.7)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .rotationEffect(.degrees(pointeAGauche ? 180 : 0))
+            }
+            .foregroundStyle(Color(.champagne))
+            .frame(width: 28, height: 88)
+            .background(Console.bouton, in: forme)
+            .overlay(forme.stroke(Color(.acier), lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.27), radius: 9, x: cote == .assistant ? 5 : -5)
+            // la cible déborde de 8 pt de chaque côté (la console : ::after), 44 pt en tout
+            .frame(width: 44, height: 88)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .offset(x: cote == .assistant ? -8 : 8)
+        .accessibilityLabel(libelle)
+        .accessibilityIdentifier(cote == .assistant ? "poigneeAssistant" : "poigneeEnvironnement")
+    }
+
+    /// L'assistant : chevron vers la gauche quand il est ouvert ; l'environnement : vers la gauche quand il est masqué.
+    private var pointeAGauche: Bool { cote == .assistant ? !masque : masque }
+
+    private var libelle: String {
+        switch cote {
+        case .assistant: masque ? "Afficher l’assistant personnel" : "Masquer l’assistant personnel"
+        case .environnement: masque ? "Afficher l’environnement" : "Masquer l’environnement"
+        }
+    }
+
+    /// Arrondie du côté de la roue, droite du côté du panneau.
+    private var forme: UnevenRoundedRectangle {
+        cote == .assistant
+            ? UnevenRoundedRectangle(bottomTrailingRadius: 10, topTrailingRadius: 10)
+            : UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10)
     }
 }

@@ -39,6 +39,16 @@ final class Alfred {
     private(set) var dernierRetour: Retour?
     /// Raison de la dernière déconnexion forcée (session expirée, refusée par la maison).
     private(set) var motifAccueil: String?
+    /// Documents, notifications, liens et état des services (nil hors connexion).
+    private(set) var annexes: Annexes?
+    /// L'agent de conversation du pipeline d'Alfred et le nombre d'entités de HA (Réglages & état).
+    private(set) var moteur: String?
+    private(set) var nombreEntites: Int?
+    /// La voix que la maison vient de reconnaître (badge « voix : <prénom> », 8 s).
+    private(set) var voixReconnue: VoixReconnue?
+    /// Le dernier mouvement de chaque secteur (allumé, éteint, ou nommé par Alfred) : le secteur bondit, comme dans la
+    /// console (`animateRoom`).
+    private(set) var mouvements: [String: Mouvement] = [:]
     let conversation: Conversation
     /// La maison de démonstration (tests d'interface, ou choisie à l'accueil pour découvrir l'app hors de la maison).
     private(set) var demo: Bool
@@ -47,6 +57,8 @@ final class Alfred {
     @ObservationIgnored private var acces: AccesURLSession?
     @ObservationIgnored private var abonnement: Task<Void, Never>?
     @ObservationIgnored private var releve: Task<Void, Never>?
+    @ObservationIgnored private var minuterieVoix: Task<Void, Never>?
+    @ObservationIgnored private var citations: Task<Void, Never>?
     @ObservationIgnored private let reglages: UserDefaults
     @ObservationIgnored private let journal = Logger(subsystem: "io.github.markedoe.alfred", category: "app")
 
@@ -108,7 +120,7 @@ final class Alfred {
     private func ouvrir(_ configuration: ConfigurationMaison, session: SessionRelais) {
         let acces = AccesURLSession(configuration: configuration, session: session)
         self.acces = acces
-        let voix = VoixSysteme(acces: acces)
+        let voix = VoixSysteme(acces: acces, reglages: reglages)
         etape = .connecte
         demarrer(acces: acces, voix: voix)
     }
@@ -117,6 +129,8 @@ final class Alfred {
         let client = ClientRelais(acces: acces)
         self.client = client
         liaison = .connexion
+        let conversation = conversation
+        annexes = Annexes(acces: acces) { texte, genre in conversation.aviser(texte, genre) }
         if let voix { conversation.remplacerVoix(voix) }
         conversation.client = client
         abonnement?.cancel()
@@ -168,6 +182,15 @@ final class Alfred {
         abonnement = nil
         releve?.cancel()
         releve = nil
+        conversation.arreterEssai()
+        annexes?.suspendre()
+        annexes = nil
+        minuterieVoix?.cancel()
+        citations?.cancel()
+        voixReconnue = nil
+        mouvements = [:]
+        moteur = nil
+        nombreEntites = nil
         await client?.arreter()
         client = nil
         conversation.client = nil
@@ -183,9 +206,17 @@ final class Alfred {
         liaison = .deconnecte
     }
 
-    /// L'app passe en arrière-plan : la conversation se ferme (le micro ne reste jamais ouvert écran caché).
+    /// L'app passe en arrière-plan : la conversation et l'essai du micro se ferment (le micro ne reste jamais ouvert
+    /// écran caché), les annexes cessent de se relire.
     func arrierePlan() async {
+        conversation.arreterEssai()
         await conversation.terminer()
+        annexes?.suspendre()
+    }
+
+    /// De retour à l'écran : les annexes se relisent tout de suite.
+    func premierPlan() {
+        annexes?.reprendre()
     }
 
     // MARK: - nouvelles de la maison
@@ -194,7 +225,12 @@ final class Alfred {
         switch n {
         case .etat(let e):
             liaison = e
-            if case .pret = e { await verifierSession(voix: voix) }
+            if case .pret = e {
+                await verifierSession(voix: voix)
+                moteur = await client.moteurConversation
+                nombreEntites = await client.nombreEntites
+                annexes?.demarrer(connecte: moi?.connecte == true)
+            }
         case .maisonChargee:
             maison = Self.utile(await client.maison, structure, console)
         case .structureChargee:
@@ -208,9 +244,18 @@ final class Alfred {
             guard id.hasPrefix("light.") || structure.capteurs.contains(id) || console.entites.contains(id) else {
                 return
             }
+            let ancien = maison[id]?.etat
             maison.appliquer(entite: id, nouvelEtat: etat)
+            // la console : tout changement d'une lumière de la roue (d'ici, d'un interrupteur, d'Alfred) la fait bouger
+            if let nouveau = etat?.etat, nouveau != ancien, ["on", "off"].contains(nouveau),
+                console.pieces.contains(where: { $0.lumiere == id })
+            {
+                mouvements[id] = Mouvement(allume: nouveau == "on")
+            }
+            if id == console.voix { montrerVoix(etat?.etat) }
         case .tour(let signal):
             conversation.recevoir(signal)
+            if case .reponse(let fin) = signal { citer(fin.texte) }
         case .commande(let cle, let issue):
             enCours.remove(cle)
             dernierRetour = Retour(cle: cle, issue: issue)
@@ -251,6 +296,40 @@ final class Alfred {
         let titreChange = moi?.titre != m.titre
         moi = m
         if titreChange { await voix?.chargerClips(titre: m.titre) }
+    }
+
+    // MARK: - mode invités, voix, pièces citées
+
+    /// Le mode invités de la maison : l'historique, le résumé, les documents et les notifications sont masqués.
+    var modeInvites: Bool { console.invites.flatMap { maison[$0]?.etat } == "on" }
+
+    /// La console (`montrerVoix`) : « voix : <prénom> » pendant 8 s ; « voix non reconnue » pour un doute ; rien sinon.
+    private func montrerVoix(_ etat: String?) {
+        minuterieVoix?.cancel()
+        guard let v = VoixReconnue(etat: etat) else {
+            voixReconnue = nil
+            return
+        }
+        voixReconnue = v
+        minuterieVoix = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, self?.voixReconnue?.id == v.id else { return }
+            self?.voixReconnue = nil
+        }
+    }
+
+    /// Les pièces nommées dans la réponse d'Alfred bougent sur la roue, l'une après l'autre (180 ms d'écart).
+    private func citer(_ texte: String) {
+        let pieces = console.citees(texte)
+        guard !pieces.isEmpty else { return }
+        citations?.cancel()
+        citations = Task { [weak self] in
+            for (i, p) in pieces.enumerated() {
+                if i > 0 { try? await Task.sleep(for: .milliseconds(180)) }
+                guard !Task.isCancelled, let self else { return }
+                self.mouvements[p.lumiere] = Mouvement(allume: self.maison[p.lumiere]?.etat == "on")
+            }
+        }
     }
 
     // MARK: - commandes
@@ -353,6 +432,37 @@ struct Secteur: Identifiable, Equatable, Sendable {
     var disponible: Bool { etat == "on" || etat == "off" }
     /// « Salon » pour VoiceOver et les phrases (« Salon allumé »).
     var nomCourant: String { String(nom.prefix(1)) + nom.dropFirst().lowercased() }
+}
+
+/// Le mouvement d'un secteur de la roue : vers l'extérieur s'il est allumé, vers l'intérieur sinon.
+struct Mouvement: Equatable, Sendable {
+    let id = UUID()
+    let allume: Bool
+}
+
+/// La voix reconnue par la maison, comme le badge de la console.
+struct VoixReconnue: Equatable, Sendable {
+    let id = UUID()
+    let texte: String
+    let incertaine: Bool
+
+    /// « voix : <prénom> » pour une personne de la maison, « voix non reconnue » pour un doute, nil sinon (personne
+    /// d'enrôlé, voix trop ancienne…). Les noms arrivent de la maison : aucun n'est écrit dans l'app.
+    init?(etat: String?) {
+        guard let etat, !etat.isEmpty else { return nil }
+        if etat == "incertain" {
+            texte = "voix non reconnue"
+            incertaine = true
+            return
+        }
+        // une personne enrôlée = un nom en minuscules seules (les profils de l'écoute) ; « non_enrole » et les états de
+        // HA (« unknown », « unavailable ») ne s'affichent pas, comme dans la console
+        guard etat.allSatisfy({ $0.isLetter && $0.isLowercase }), !["unknown", "unavailable"].contains(etat) else {
+            return nil
+        }
+        texte = "voix : " + etat.prefix(1).uppercased() + etat.dropFirst()
+        incertaine = false
+    }
 }
 
 /// Une mesure et son unité (celle que donne Home Assistant).

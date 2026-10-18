@@ -20,10 +20,13 @@ final class Conversation {
         case reponse
     }
 
+    /// Un outil appelé par Alfred, comme les « Détails techniques » de la console : son nom court et ses arguments
+    /// (jamais le contenu de son résultat : l'agenda, par exemple, est privé).
     struct Outil: Identifiable, Equatable, Sendable {
         enum Etat: Equatable, Sendable { case enCours, fait, echec }
         let id: String
-        let libelle: String
+        let nom: String
+        let arguments: String
         var etat: Etat
     }
 
@@ -36,7 +39,14 @@ final class Conversation {
         var enCours = false
         var erreur = false
         var comprisLocalement = false
+        /// Le temps de la réponse (de la demande comprise à la fin d'Alfred), comme le badge « 1.4s » de la console.
+        var duree: Double?
         let date: Date
+    }
+
+    /// L'essai du micro (Réglages & état) : le micro s'ouvre et son niveau s'affiche ; rien n'est envoyé à la maison.
+    enum Essai: Equatable, Sendable {
+        case arrete, ouverture, actif
     }
 
     /// Un avis passager (en haut de l'écran, avec un retour haptique).
@@ -58,6 +68,15 @@ final class Conversation {
     private(set) var avis: Avis?
     /// Nombre de tours de voix réussis (retour haptique « succès »).
     private(set) var reponses = 0
+    /// La durée de la dernière réponse (la console : « Dernière réponse », dans Réglages & état).
+    private(set) var derniereDuree: Double?
+    private(set) var essai = Essai.arrete
+    private(set) var messageEssai = Conversation.messageEssaiInitial
+    /// Le niveau du micro pendant l'essai (0…1), lu à chaque image par la jauge (hors observation).
+    @ObservationIgnored private(set) var niveauEssai: Float = 0
+    @ObservationIgnored private var tacheEssai: Task<Void, Never>?
+
+    static let messageEssaiInitial = "Autorisez le micro, puis lancez le test pour vérifier le signal ici."
     /// Lire à voix haute les réponses aux questions écrites (comme Siri : non par défaut).
     var lireReponsesEcrites: Bool {
         didSet { reglages.set(lireReponsesEcrites, forKey: Self.cleLireEcrit) }
@@ -114,6 +133,7 @@ final class Conversation {
             await terminer()
             return
         }
+        guard essai == .arrete else { return }
         guard client != nil else {
             aviser("La maison n’est pas jointe pour l’instant.", .attention)
             return
@@ -129,6 +149,7 @@ final class Conversation {
             aviser("Le micro n’a pas pu s’ouvrir.", .attention)
             return
         }
+        signalerEntreeOubliee()
         enConversation = true
         detecteur = DetecteurParole(conversation: true)
         ecouterTour(marge: 0)
@@ -219,6 +240,102 @@ final class Conversation {
         if phase == .ecoute || phase == .reponse { phase = .repos }
     }
 
+    // MARK: - essai du micro
+
+    /// « Tester le micro » / « Arrêter le test » (la console : `micTest`) : le niveau s'affiche, aucun pipeline n'est
+    /// lancé ; sans signal au bout de 2,5 s, on le dit.
+    func basculerEssai() async {
+        if essai != .arrete {
+            arreterEssai()
+            return
+        }
+        guard !enConversation, phase == .repos else { return }
+        essai = .ouverture
+        messageEssai = "Ouverture du micro… Acceptez la demande d’iOS si elle apparaît."
+        guard await voix.autoriserMicro() else {
+            essai = .arrete
+            messageEssai = "Test micro impossible : l’accès au micro est refusé. Autorisez-le dans Réglages › Alfred."
+            return
+        }
+        let flux: AsyncStream<[Float]>
+        do {
+            flux = try voix.ouvrirMicro()
+        } catch {
+            essai = .arrete
+            messageEssai = "Test micro impossible : le micro n’a pas pu s’ouvrir."
+            return
+        }
+        signalerEntreeOubliee()
+        essai = .actif
+        messageEssai = "Test actif · parlez : la barre ci-dessous doit réagir. Aucun son n’est envoyé à Alfred."
+        let debut = Date.now
+        tacheEssai = Task { [weak self] in
+            var pic: Float = 0
+            var silence = false
+            for await echantillons in flux {
+                guard let self, self.essai == .actif else { return }
+                let n = Self.niveau(echantillons)
+                self.niveauEssai = n
+                pic = max(pic, n)
+                if n > Self.seuilSignal, silence {
+                    silence = false
+                    self.messageEssai = "Signal reçu · le microphone fonctionne. Vous pouvez arrêter le test."
+                }
+                if !silence, pic <= Self.seuilSignal, Date.now.timeIntervalSince(debut) > 2.5 {
+                    silence = true
+                    self.messageEssai =
+                        "Micro ouvert, mais aucun signal reçu. Parlez ou choisissez une autre entrée ; vérifiez aussi "
+                        + "l’accès au micro dans Réglages › Alfred."
+                }
+            }
+        }
+    }
+
+    /// Fin de l'essai (le bouton, la fenêtre fermée, l'app cachée) : le micro est libéré.
+    func arreterEssai() {
+        guard essai != .arrete else { return }
+        tacheEssai?.cancel()
+        tacheEssai = nil
+        voix.fermerMicro()
+        essai = .arrete
+        niveauEssai = 0
+        messageEssai = "Test arrêté · microphone libéré."
+    }
+
+    /// « Autoriser le micro » (la console : `unlockDevices`).
+    func autoriserMicro() async {
+        guard essai == .arrete, !enConversation else { return }
+        if await voix.autoriserMicro() {
+            let nom = voix.entrees().first { $0.uid == voix.entreeChoisie }?.nom ?? voix.entrees().first?.nom
+            messageEssai =
+                "Micro autorisé" + (nom.map { " · " + $0 } ?? "")
+                + ". Lancez « Tester le micro » pour vérifier le signal."
+        } else {
+            messageEssai = "Autorisation micro refusée. Autorisez le micro dans Réglages › Alfred."
+        }
+    }
+
+    /// Les micros de l'appareil, et celui qui est choisi (nil : celui d'iOS).
+    func entreesMicro() -> [EntreeMicro] { voix.entrees() }
+    var entreeMicroChoisie: String? { voix.entreeChoisie }
+
+    /// Un autre micro : gardé sur l'appareil ; un essai en cours repart avec lui (comme la console).
+    func choisirEntreeMicro(_ uid: String?) {
+        voix.entreeChoisie = uid
+        guard essai == .actif else { return }
+        arreterEssai()
+        Task { await basculerEssai() }
+    }
+
+    /// Le micro choisi a disparu (AirPods rangés, micro débranché) : retour à celui d'iOS, et on le dit.
+    private func signalerEntreeOubliee() {
+        guard voix.entreeOubliee else { return }
+        voix.entreeOubliee = false
+        aviser("Le micro choisi n’est plus là : retour au micro par défaut.", .attention)
+    }
+
+    static let seuilSignal: Float = 0.02
+
     // MARK: - écrit
 
     /// Une question écrite. Ferme d'abord la conversation à la voix, s'il y en a une.
@@ -265,7 +382,11 @@ final class Conversation {
             phase = .reflexion
             commencerReponse()
         case .outilCommence(let appel):
-            modifierReponse { $0.outils.append(Outil(id: appel.id, libelle: Self.libelle(appel), etat: .enCours)) }
+            modifierReponse {
+                guard !$0.outils.contains(where: { $0.id == appel.id }) else { return }
+                $0.outils.append(
+                    Outil(id: appel.id, nom: appel.nomCourt, arguments: appel.argumentsEnTexte, etat: .enCours))
+            }
         case .outilTermine(let id, let succes):
             modifierReponse { m in
                 if let i = m.outils.firstIndex(where: { $0.id == id }) { m.outils[i].etat = succes ? .fait : .echec }
@@ -277,6 +398,8 @@ final class Conversation {
                 if !fin.texte.isEmpty { $0.texte = fin.texte }
                 $0.enCours = false
                 $0.comprisLocalement = fin.traiteeLocalement
+                $0.duree = Date.now.timeIntervalSince($0.date)
+                derniereDuree = $0.duree
             }
             reponses += 1
         case .voix(let chemin):
@@ -363,31 +486,5 @@ final class Conversation {
         var somme: Float = 0
         for s in echantillons { somme += s * s }
         return min(1, (somme / Float(echantillons.count)).squareRoot() * 6)
-    }
-
-    /// Ce qu'Alfred fait, en mots simples (jamais le contenu d'un résultat : l'agenda, par exemple, est privé).
-    static func libelle(_ appel: AppelOutil) -> String {
-        let verbe: String =
-            switch appel.nomCourt {
-            case "HassTurnOn": "Allumer"
-            case "HassTurnOff": "Éteindre"
-            case "HassLightSet": "Régler la lumière"
-            case "HassSetPosition": "Régler l’ouverture"
-            case "HassMediaPause": "Mettre en pause"
-            case "HassMediaUnpause": "Reprendre la lecture"
-            case "HassMediaNext": "Morceau suivant"
-            case "HassSetVolume": "Régler le volume"
-            case "HassGetState", "GetLiveContext": "Lire l’état de la maison"
-            case "HassGetWeather": "Lire la météo"
-            case "HassStartTimer": "Lancer une minuterie"
-            case "HassCancelTimer", "HassCancelAllTimers": "Arrêter la minuterie"
-            case "todo_get_items": "Lire une liste"
-            case "calendar_get_events": "Lire l’agenda"
-            default:
-                appel.nomCourt.replacingOccurrences(of: "script__", with: "")
-                    .replacingOccurrences(of: "_", with: " ").capitalized(with: Locale(identifier: "fr_CH"))
-            }
-        let cible = ["name", "area", "floor"].lazy.compactMap { appel.arguments[$0]?.texte }.first
-        return cible.map { "\(verbe) · \($0)" } ?? verbe
     }
 }

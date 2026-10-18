@@ -3,7 +3,8 @@ import Foundation
 /// La maison telle que la CONSOLE la montre : `GET /maison/console` du relais (contrat v1, `docs/contrat-relais.md`).
 ///
 /// La console a sa propre roue (des groupes de lumières aux noms courts, avec leurs capteurs), ses jauges et sa
-/// météo ; l'app montre exactement les mêmes. Aucun identifiant d'entité n'est écrit dans l'app : ils arrivent ici.
+/// météo ; l'app montre exactement les mêmes. Aucun identifiant d'entité n'est écrit dans l'app : ils arrivent ici,
+/// comme les mots qui désignent chaque pièce, le mode invités et la voix reconnue (champs facultatifs du contrat v1).
 public struct ConsoleMaison: Sendable, Equatable {
     public static let versionContrat = 1
 
@@ -15,11 +16,14 @@ public struct ConsoleMaison: Sendable, Equatable {
         public let temperature: String?
         public let humidite: String?
         public let air: String?
+        /// L'expression qui reconnaît la pièce dans une réponse d'Alfred (la console : `ROOM_WORDS`), appliquée au
+        /// texte en minuscules ; nil si la pièce n'en a pas.
+        public let mots: String?
         public var id: String { lumiere }
 
         public init(
             nom: String, etage: String, lumiere: String, temperature: String? = nil, humidite: String? = nil,
-            air: String? = nil
+            air: String? = nil, mots: String? = nil
         ) {
             self.nom = nom
             self.etage = etage
@@ -27,6 +31,7 @@ public struct ConsoleMaison: Sendable, Equatable {
             self.temperature = temperature
             self.humidite = humidite
             self.air = air
+            self.mots = mots
         }
     }
 
@@ -89,15 +94,24 @@ public struct ConsoleMaison: Sendable, Equatable {
     public private(set) var jauges: [Jauge] = []
     public private(set) var meteo: String?
     public private(set) var puissance: String?
+    /// Le mode invités (`input_boolean`) : tant qu'il est « on », l'historique et le résumé sont masqués.
+    public private(set) var invites: String?
+    /// La voix reconnue par la maison (un prénom en minuscules, « incertain »…), montrée 8 s à chaque changement.
+    public private(set) var voix: String?
 
     public init() {}
 
-    public init(pieces: [Piece], autres: [Mesuree], jauges: [Jauge], meteo: String?, puissance: String?) {
+    public init(
+        pieces: [Piece], autres: [Mesuree], jauges: [Jauge], meteo: String?, puissance: String?,
+        invites: String? = nil, voix: String? = nil
+    ) {
         self.pieces = pieces
         self.autres = autres
         self.jauges = jauges
         self.meteo = meteo
         self.puissance = puissance
+        self.invites = invites
+        self.voix = voix
     }
 
     /// nil si la réponse n'est pas du contrat v1.
@@ -107,7 +121,7 @@ public struct ConsoleMaison: Sendable, Equatable {
             guard let nom = p["nom"]?.texte, let lumiere = p["lumiere"]?.texte else { return nil }
             return Piece(
                 nom: nom, etage: p["etage"]?.texte ?? "", lumiere: lumiere, temperature: p["temperature"]?.texte,
-                humidite: p["humidite"]?.texte, air: p["air"]?.texte)
+                humidite: p["humidite"]?.texte, air: p["air"]?.texte, mots: p["mots"]?.texte)
         }
         let autres = (v["autres"]?.liste ?? []).compactMap { p -> Mesuree? in
             guard let nom = p["nom"]?.texte else { return nil }
@@ -120,7 +134,8 @@ public struct ConsoleMaison: Sendable, Equatable {
             return Jauge(entite: e, libelle: l, unite: j["unite"]?.texte ?? "", max: m)
         }
         return ConsoleMaison(
-            pieces: pieces, autres: autres, jauges: jauges, meteo: v["meteo"]?.texte, puissance: v["puissance"]?.texte)
+            pieces: pieces, autres: autres, jauges: jauges, meteo: v["meteo"]?.texte, puissance: v["puissance"]?.texte,
+            invites: v["invites"]?.texte, voix: v["voix"]?.texte)
     }
 
     public var vide: Bool { pieces.isEmpty }
@@ -132,7 +147,20 @@ public struct ConsoleMaison: Sendable, Equatable {
         s.formUnion(jauges.map(\.entite))
         if let meteo { s.insert(meteo) }
         if let puissance { s.insert(puissance) }
+        if let invites { s.insert(invites) }
+        if let voix { s.insert(voix) }
         return s
+    }
+
+    /// Les pièces qu'une réponse d'Alfred nomme, dans l'ordre de la roue (la console : `highlightRooms`). Une expression
+    /// illisible est ignorée.
+    public func citees(_ texte: String) -> [Piece] {
+        let t = texte.lowercased()
+        let plage = NSRange(t.startIndex..., in: t)
+        return pieces.filter { p in
+            guard let mots = p.mots, let rx = try? NSRegularExpression(pattern: mots) else { return false }
+            return rx.firstMatch(in: t, range: plage) != nil
+        }
     }
 
     /// L'ordre des étages de la console (du sous-sol au 2e), pour la liste « Intérieur ».

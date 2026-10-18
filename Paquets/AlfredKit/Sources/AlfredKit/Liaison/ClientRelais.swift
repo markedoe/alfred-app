@@ -19,6 +19,15 @@ public protocol AccesRelais: Sendable {
     func ouvrir() async throws -> any Liaison
     /// GET d'un chemin du relais : statut HTTP et corps.
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data)
+    /// POST ou DELETE (documents, notifications) : statut HTTP et corps.
+    func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data)
+}
+
+extension AccesRelais {
+    /// Par défaut, aucune écriture (un accès qui n'en a pas besoin, comme ceux des tests de la liaison).
+    public func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data) {
+        throw ErreurRelais("écriture non prise en charge")
+    }
 }
 
 public struct ErreurRelais: Error, Sendable, Equatable, CustomStringConvertible {
@@ -78,6 +87,10 @@ public actor ClientRelais {
     public private(set) var console = ConsoleMaison()
     /// Le pipeline préféré de HA (« Alfred ») ; nil = celui de HA par défaut.
     public private(set) var pipelinePrefere: String?
+    /// L'agent de conversation de ce pipeline, sans « conversation. » (la console : « Modèle », dans Réglages & état).
+    public private(set) var moteurConversation: String?
+    /// Le nombre d'entités de HA reçues à la synchronisation (la console : « Entités »).
+    public private(set) var nombreEntites = 0
     public private(set) var tour = AutomateTour()
 
     private var sortie: AsyncStream<Trame>.Continuation?
@@ -199,6 +212,7 @@ public actor ClientRelais {
             let r = try await demander(["type": "get_states"])
             guard r.succes else { throw ErreurRelais("Synchronisation de la maison impossible") }
             maison.charger(r.valeur)
+            nombreEntites = r.valeur?.liste?.count ?? 0
             annonce.yield(.maisonChargee)
             envoyer(["type": "subscribe_events", "event_type": "state_changed"])
             structure = await lireStructure()
@@ -208,11 +222,22 @@ public actor ClientRelais {
             // prêt seulement quand le pipeline est connu : un tour lancé avant partirait sur un autre pipeline
             let p = try await demander(["type": "assist_pipeline/pipeline/list"])
             pipelinePrefere = p.succes ? p.valeur?["preferred_pipeline"]?.texte : nil
+            moteurConversation = Self.moteur(p.succes ? p.valeur : nil, pipeline: pipelinePrefere)
             changer(.pret(versionHA: versionHA))
         } catch {
             changer(.fatal((error as? ErreurRelais)?.message ?? "Synchronisation de la maison impossible"))
             await liaison?.fermer()
         }
+    }
+
+    /// L'agent de conversation du pipeline voulu (`conversation.gemma` → `gemma`), dans la réponse de
+    /// `assist_pipeline/pipeline/list`.
+    static func moteur(_ liste: ValeurJSON?, pipeline: String?) -> String? {
+        guard let pipeline,
+            let p = liste?["pipelines"]?.liste?.first(where: { $0["id"]?.texte == pipeline }),
+            let moteur = p["conversation_engine"]?.texte, !moteur.isEmpty
+        else { return nil }
+        return moteur.hasPrefix("conversation.") ? String(moteur.dropFirst("conversation.".count)) : moteur
     }
 
     /// `GET /maison/structure` ; un relais sans cette route (ou d'un autre contrat) laisse la structure vide :

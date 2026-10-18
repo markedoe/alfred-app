@@ -93,6 +93,27 @@ public struct AppelOutil: Sendable, Equatable, Identifiable {
         return nom
     }
 
+    /// Les arguments comme la console les montre dans « Détails techniques » (`argsOf`) : les valeurs, séparées par des
+    /// virgules, un objet ou une liste en JSON. Les clés sont dans l'ordre alphabétique (la console garde l'ordre
+    /// d'arrivée, qu'un dictionnaire ne connaît pas).
+    public var argumentsEnTexte: String {
+        guard case .objet(let o) = arguments else { return Self.texte(arguments) }
+        return o.sorted { $0.key < $1.key }.map { Self.texte($0.value) }.joined(separator: ", ")
+    }
+
+    /// `String(v)` de JavaScript pour une valeur simple, `JSON.stringify` pour un objet ou une liste.
+    static func texte(_ v: ValeurJSON) -> String {
+        switch v {
+        case .texte(let t): return t
+        case .booleen(let b): return b ? "true" : "false"
+        case .nul: return "null"
+        case .nombre(let n):
+            if n.rounded() == n, abs(n) < 1e15 { return String(Int(n)) }
+            return "\(n)"
+        case .liste, .objet: return v.enTexte()
+        }
+    }
+
     /// Les entités nommées dans les arguments (pour montrer la pièce visée).
     public var entitesVisees: [String] {
         var vues: [String] = []

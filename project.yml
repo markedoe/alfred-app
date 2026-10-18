@@ -79,6 +79,9 @@ targets:
           - microphone
         NSMicrophoneUsageDescription: >-
           Alfred n’écoute que lorsque vous lui parlez, le temps de comprendre votre demande.
+        # le scanner de documents (VisionKit) : un document que vous déposez à la maison
+        NSCameraUsageDescription: >-
+          Alfred utilise l’appareil photo seulement pour numériser un document que vous déposez à la maison.
         NSLocalNetworkUsageDescription: >-
           Alfred se connecte à votre maison par le réseau local, sans passer par internet.
         NSAppTransportSecurity:

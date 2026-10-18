@@ -5,6 +5,7 @@ import Foundation
 /// Aucune donnée réelle, aucun réseau.
 final class AccesDemo: AccesRelais, @unchecked Sendable {
     private let maison = MaisonDemo()
+    private let annexes = AnnexesDemo()
 
     func ouvrir() async throws -> any Liaison {
         let l = LiaisonDemo(maison: maison)
@@ -13,13 +14,119 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
     }
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
+        let corps: ValeurJSON
         switch chemin {
-        case "/maison/console": (200, Data(MaisonDemo.console.enTexte().utf8))
-        case "/maison/structure": (200, Data(MaisonDemo.structure.enTexte().utf8))
-        case "/moi": (200, Data(#"{"connecte":true,"nom":"Démo","user_id":null,"titre":"Monsieur"}"#.utf8))
-        default: (404, Data())
+        case "/maison/console": corps = MaisonDemo.console
+        case "/maison/structure": corps = MaisonDemo.structure
+        case "/moi": corps = ["connecte": true, "nom": "Démo", "user_id": .nul, "titre": "Monsieur"]
+        case "/etat": corps = AnnexesDemo.etat
+        case "/liens": corps = AnnexesDemo.liens
+        case "/docs": corps = await annexes.documents()
+        case "/notifications": corps = await annexes.notifications()
+        default: return (404, Data())
+        }
+        return (200, Data(corps.enTexte().utf8))
+    }
+
+    /// Les écritures de la démo restent dans la démo (rien ne part, rien n'est gardé).
+    func envoyer(_ r: RequeteRelais) async throws -> (statut: Int, corps: Data) {
+        switch (r.methode, r.chemin) {
+        case (.post, "/docs"):
+            return (await annexes.deposer(r.corps ?? Data()) ? 202 : 400, Data())
+        case (.post, "/notifications/lues"):
+            await annexes.toutLire()
+            return (200, Data())
+        case (.post, "/notifications/effacer"):
+            await annexes.toutEffacer()
+            return (200, Data())
+        case (.delete, let c) where c.hasPrefix("/docs/"):
+            return (await annexes.supprimer(String(c.dropFirst("/docs/".count))) ? 200 : 404, Data())
+        default:
+            return (404, Data())
         }
     }
+}
+
+/// Documents, notifications, liens et état des services de la démonstration : génériques, aucune donnée réelle.
+actor AnnexesDemo {
+    static let etat: ValeurJSON = [
+        "groupes": [
+            [
+                "nom": "Maison",
+                "services": [["nom": "Home Assistant", "statut": "ok"], ["nom": "Alertes", "statut": "ok"]],
+            ],
+            [
+                "nom": "Voix d'Alfred",
+                "services": [
+                    ["nom": "Relais", "statut": "ok"], ["nom": "Garde", "statut": "ok"],
+                    ["nom": "Modèle", "statut": "eteint"], ["nom": "Transcription", "statut": "eteint"],
+                ],
+            ],
+            ["nom": "Surveillance", "services": [["nom": "Revue de nuit", "statut": "ok"]]],
+        ],
+        "kuma": .nul,
+    ]
+
+    static let liens: ValeurJSON = [
+        ["nom": "Home Assistant", "url": "https://www.home-assistant.io", "note": "la maison"],
+        ["nom": "Paperless", "url": "https://docs.paperless-ngx.com", "note": "les documents"],
+    ]
+
+    private var docs: [ValeurJSON] = [
+        [
+            "id": "demo-1", "nom": "Facture d’exemple", "etat": "pret",
+            "resume": "Une facture de démonstration : 120 francs, à payer d’ici la fin du mois.",
+            "depose_le": "2026-10-17T09:30:00+02:00", "pour_le": "2026-10-31", "paperless": ["tache": "demo"],
+        ]
+    ]
+    private var notifs: [ValeurJSON] = [
+        [
+            "id": "n1", "titre": "Alfred", "message": "Exemple : la lessive est terminée.", "t": 1_792_220_000,
+            "lu": false,
+        ],
+        [
+            "id": "n2", "titre": "Hermes", "message": "Exemple : votre réponse est prête.", "t": 1_792_200_000,
+            "lu": true,
+        ],
+    ]
+    private var depots = 0
+
+    func documents() -> ValeurJSON { ["documents": .liste(docs)] }
+
+    func notifications() -> ValeurJSON {
+        ["notifications": .liste(notifs), "non_lues": .nombre(Double(notifs.filter { $0["lu"] == false }.count))]
+    }
+
+    /// Un dépôt de la démo : le nom du fichier est relu dans le corps ; la fiche est « prête » d'emblée.
+    func deposer(_ corps: Data) -> Bool {
+        let texte = String(decoding: corps.prefix(4096), as: UTF8.self)
+        guard let r = texte.range(of: #"filename="([^"]+)""#, options: .regularExpression) else { return false }
+        let nom = texte[r].dropFirst("filename=\"".count).dropLast()
+        depots += 1
+        docs.insert(
+            [
+                "id": .texte("demo-depot-\(depots)"), "nom": .texte(String(nom)), "etat": "pret",
+                "resume": "Document de démonstration : rien n’a quitté l’appareil.",
+                "depose_le": .texte(ISO8601DateFormatter().string(from: .now)),
+            ], at: 0)
+        return true
+    }
+
+    func supprimer(_ id: String) -> Bool {
+        let avant = docs.count
+        docs.removeAll { $0["id"]?.texte == id }
+        return docs.count < avant
+    }
+
+    func toutLire() {
+        notifs = notifs.map { n in
+            guard case .objet(var o) = n else { return n }
+            o["lu"] = true
+            return .objet(o)
+        }
+    }
+
+    func toutEffacer() { notifs = [] }
 }
 
 /// L'état de la maison de démonstration : une roue de console de 14 pièces aux noms génériques, des mesures, la météo
@@ -85,6 +192,7 @@ actor MaisonDemo {
                     "temperature": p.temperature == nil ? .nul : .texte("sensor.demo_\(p.id)_t"),
                     "humidite": p.humidite == nil ? .nul : .texte("sensor.demo_\(p.id)_h"),
                     "air": p.id == "salon" ? "sensor.demo_salon_cov" : .nul,
+                    "mots": .texte(#"\b"# + NSRegularExpression.escapedPattern(for: p.mot) + #"\b"#),
                 ]
             }),
         "autres": [
@@ -101,6 +209,7 @@ actor MaisonDemo {
             ["entite": "sensor.demo_jour", "libelle": "jour", "unite": "kWh", "max": 10],
         ],
         "meteo": "weather.demo", "puissance": "sensor.demo_maison",
+        "invites": "input_boolean.demo_invites", "voix": "sensor.demo_voix",
     ]
 
     /// Les pièces de HA (relais d'avant `/maison/console`) : une lumière par pièce.
@@ -137,6 +246,10 @@ actor MaisonDemo {
         capteur("sensor.demo_pc", "86", "W")
         capteur("sensor.demo_maison", "640", "W")
         capteur("sensor.demo_jour", "1.42", "kWh")
+        e["input_boolean.demo_invites"] = [
+            "entity_id": "input_boolean.demo_invites", "state": "off", "attributes": [:],
+        ]
+        e["sensor.demo_voix"] = ["entity_id": "sensor.demo_voix", "state": "unknown", "attributes": [:]]
         e["weather.demo"] = [
             "entity_id": "weather.demo", "state": "partlycloudy",
             "attributes": [
@@ -231,7 +344,12 @@ actor LiaisonDemo: Liaison {
         case "subscribe_events", "assist_pipeline/pipeline/list":
             pousser([
                 "id": id, "type": "result", "success": true,
-                "result": m["type"] == "subscribe_events" ? .nul : ["pipelines": [], "preferred_pipeline": "demo"],
+                "result": m["type"] == "subscribe_events"
+                    ? .nul
+                    : [
+                        "pipelines": [["id": "demo", "conversation_engine": "conversation.demo"]],
+                        "preferred_pipeline": "demo",
+                    ],
             ])
         case "call_service":
             pousser(["id": id, "type": "result", "success": true, "result": .nul])

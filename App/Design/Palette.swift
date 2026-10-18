@@ -139,10 +139,13 @@ struct PanneauVerre<Contenu: View>: View {
 
 // MARK: - boutons
 
-/// Un bouton de la console : fond bleu nuit, bordure acier, texte glacé ; la variante principale (« Parler à
-/// Alfred ») a la bordure du faisceau, la variante « session » est champagne. Au moins 44 pt de haut.
+/// Un bouton de la console : fond bleu nuit, bordure acier, texte glacé, en gras (650 dans la console, entre le
+/// demi-gras et le gras du système : le gras est le plus proche à l'œil, comparé aux captures) ; la variante principale
+/// (« Parler à Alfred ») a la bordure du faisceau, la variante « session » est champagne, « alerte » rouge (une action
+/// qui défait, comme « Se déconnecter »), « pièce » un bouton ordinaire bordé du faisceau (`#room-action`). Au moins
+/// 44 pt de haut.
 struct StyleConsole: ButtonStyle {
-    enum Genre { case normal, principal, session, sodium }
+    enum Genre { case normal, principal, session, sodium, alerte, piece }
     var genre: Genre
     var hauteur: CGFloat
     @Environment(\.isEnabled) private var actif
@@ -154,7 +157,7 @@ struct StyleConsole: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold))
+            .font(.subheadline.weight(.bold))
             .multilineTextAlignment(.center)
             .lineLimit(2)
             .minimumScaleFactor(0.85)
@@ -177,6 +180,8 @@ struct StyleConsole: ButtonStyle {
         case .principal: Console.textePrincipal
         case .session: Console.texteSession
         case .sodium: Color(.sodium)
+        case .alerte: Color(.alerte)
+        case .piece: Color(.glace)
         }
     }
 
@@ -186,6 +191,8 @@ struct StyleConsole: ButtonStyle {
         case .principal: Color(.faisceau)
         case .session: Color(.champagne)
         case .sodium: Color(.sodium)
+        case .alerte: Color(.alerte)
+        case .piece: Color(.faisceau)
         }
     }
 
@@ -193,7 +200,7 @@ struct StyleConsole: ButtonStyle {
         guard actif else { return Console.boutonInactif }
         if enfonce { return Console.boutonEnfonce }
         switch genre {
-        case .normal, .sodium: return Console.bouton
+        case .normal, .sodium, .alerte, .piece: return Console.bouton
         case .principal: return Console.boutonPrincipal
         case .session: return Console.boutonSession
         }

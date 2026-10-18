@@ -25,6 +25,15 @@ et les tests d’`AlfredKit` le vérifient.
 | `GET /maison/console` | Version 1, réservée aux personnes connectées : la roue, les jauges et la météo de la console. |
 | `GET /tts/<jeton>` | La voix d’Alfred, servie **pendant** sa synthèse (MP3 en continu). |
 | `GET /static/ack/ack-<n><suffixe>.mp3` | Les clips d’accueil (« Bien, Monsieur »). Le suffixe vaut `""`, `-madame`, `-mademoiselle` ou `-neutre`. |
+| `GET /docs` | `{"documents": [{"id", "nom", "etat": "pret" \| "en cours" \| "erreur", "resume", "erreur", "depose_le", "pour_le", "paperless", "alerte"}]}`, la plus récente d’abord ; jamais le texte d’un document. 401 sans connexion, 403 pour un compte sans documents. |
+| `POST /docs` | Dépôt multipart : `fichier` (PDF, JPEG, PNG, WebP, texte ou e-mail, 20 Mo au plus), `nom`, `pour_le` (AAAA-MM-JJ, facultatif). 202 et la fiche ; 415 pour un autre type. |
+| `DELETE /docs/<id>` | Supprime le document partout. |
+| `GET /notifications` | `{"notifications": [{"id", "t", "titre", "message", "lu"}], "non_lues": n}` : celles de la personne connectée seulement (copie de ses téléphones, réponses d’Hermes annoncées). 401 sans connexion. |
+| `POST /notifications/lues` · `POST /notifications/effacer` | Tout marquer comme lu · tout effacer. |
+| `GET /liens` | `[{"nom", "url", "note"}]` : les autres systèmes, selon le compte (vide pour un invité ; 503 si HA ne répond pas). L’app n’ouvre qu’une adresse http(s), dans Safari. |
+| `GET /etat` | `{"groupes": [{"nom", "services": [{"nom", "statut": "ok" \| "attente" \| "panne" \| "eteint" \| "inconnu", "message", "depuis"}]}], "kuma": url}` : l’état des services (Uptime Kuma). |
+
+Les écritures (`POST`, `DELETE`) portent l’en-tête `Origin` du relais, comme la console.
 
 **Détail de `GET /maison/structure` :**
 
@@ -50,11 +59,20 @@ console, telles qu’elle les montre. L’app montre la même roue ; sans cette 
   "autres": [{"nom": "CAVE", "etage": "ss", "temperature": "sensor.…", "humidite": "sensor.…"}],
   "jauges": [{"entite": "sensor.…", "libelle": "maison", "unite": "W", "max": 6000}],
   "meteo": "weather.…",
-  "puissance": "sensor.…"
+  "puissance": "sensor.…",
+  "invites": "input_boolean.…",
+  "voix": "sensor.…"
 }
 ```
 
 `pieces` est dans l’ordre de la roue (le 1er secteur en haut, puis dans le sens des aiguilles d’une montre).
+
+Champs facultatifs de la version 1 (absents ou `null` : la fonction est simplement absente) :
+- `pieces[].mots` : l’expression régulière qui reconnaît la pièce dans une réponse d’Alfred, à appliquer au texte en
+  minuscules ; la roue anime les pièces citées, l’une après l’autre ;
+- `invites` : le mode invités ; tant qu’il vaut `on`, l’historique, le résumé, les documents et les notifications
+  sont masqués ;
+- `voix` : la voix reconnue par la maison (un nom de personne en minuscules, ou `incertain`), montrée 8 s.
 
 ## WebSocket `wss://<relais>/ws`
 

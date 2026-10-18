@@ -38,9 +38,7 @@ struct Roue: View {
                 if g.secteurs.indices.contains(i) {
                     Plaque(
                         secteur: s, forme: g.secteurs[i], rayon: rayon, nombre: secteurs.count,
-                        choisi: choisi == s.id, enAttente: alfred.enCours(s.id),
-                        confirmation: alfred.action?.secteur == s.id && alfred.action?.etat == .confirmee
-                            ? alfred.action?.fin : nil
+                        choisi: choisi == s.id, enAttente: alfred.enCours(s.id), mouvement: alfred.mouvements[s.id]
                     ) {
                         choisi = s.id
                     }
@@ -144,8 +142,9 @@ private struct Plaque: View {
     let nombre: Int
     let choisi: Bool
     let enAttente: Bool
-    /// L'heure de la confirmation reçue (le secteur bondit vers l'extérieur, comme la console).
-    let confirmation: Date?
+    /// Le dernier mouvement du secteur : sa lumière a changé (d'ici, d'un interrupteur, d'Alfred), ou Alfred l'a nommé ;
+    /// il bondit vers l'extérieur s'il est allumé, vers l'intérieur sinon (la console : `animateRoom`).
+    let mouvement: Mouvement?
     let ouvrir: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduire
     @Environment(\.animationsCoupees) private var immobile
@@ -157,9 +156,9 @@ private struct Plaque: View {
         let f = FormeSecteur(forme)
         let carre = CGRect(x: 0, y: 0, width: rayon * 2, height: rayon * 2)
         let boite = f.path(in: carre).boundingRect
-        // le bond de confirmation : vers l'extérieur si la pièce s'allume, vers l'intérieur si elle s'éteint
+        // le bond : vers l'extérieur si la pièce est allumée, vers l'intérieur sinon
         let milieu = forme.milieu
-        let amplitude = Double(min(14, rayon * 0.045)) * (allume ? 1 : -0.65)
+        let amplitude = Double(min(14, rayon * 0.045)) * ((mouvement?.allume ?? allume) ? 1 : -0.65)
         ZStack {
             Group {
                 // bord extrudé (5 pt plus bas)
@@ -200,8 +199,8 @@ private struct Plaque: View {
                 CubicKeyframe(0, duration: 0.56)
             }
         }
-        .onChange(of: confirmation) { _, date in
-            if date != nil, !reduire, !immobile { bonds += 1 }
+        .onChange(of: mouvement) { _, m in
+            if m != nil, !reduire, !immobile { bonds += 1 }
         }
         .onChange(of: enAttente, initial: true) { _, attente in
             guard attente, !reduire, !immobile else { return }
