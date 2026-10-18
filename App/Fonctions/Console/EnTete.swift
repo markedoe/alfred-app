@@ -73,7 +73,7 @@ struct EnTeteConsole: View {
 
     private func ligne(serre: Bool) -> some View {
         HStack(spacing: large ? 20 : textes ? 12 : 8) {
-            Marque(textes: textes, serre: serre, lien: LienMaison.mot(alfred.liaison))
+            MarqueEnTete(textes: textes, serre: serre, lien: LienMaison.mot(alfred.liaison))
             if large {
                 Rectangle().fill(Color(.trait)).frame(width: 1, height: 24).accessibilityHidden(true)
             }
@@ -142,7 +142,7 @@ struct EnTeteConsole: View {
 /// ALFRED / MANOR COMMAND. Une vue à part : ses mesures suivent la taille du texte plafonnée de l'en-tête (une mesure
 /// déclarée dans l'en-tête lui-même lirait la taille d'avant le plafond). Sur téléphone, le lien n'est qu'un point de
 /// couleur : son état est lu ici par VoiceOver (« Alfred, lien : Connecté »).
-private struct Marque: View {
+private struct MarqueEnTete: View {
     let textes: Bool
     let serre: Bool
     let lien: String
