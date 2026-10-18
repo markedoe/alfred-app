@@ -114,7 +114,7 @@ final class Annexes {
             switch statut {
             case 200:
                 let l = try JSONDecoder().decode(ListeDocuments.self, from: corps).documents
-                accesDocuments = .ouvert
+                if accesDocuments != .ouvert { accesDocuments = .ouvert }
                 if l != documents { documents = l }
                 return l.contains { $0.etat == .enCours } ? .milliseconds(2500) : .seconds(60)
             case 401:
@@ -140,15 +140,15 @@ final class Annexes {
     private func chargerNotifications() async -> Duration {
         guard let (statut, corps) = try? await acces.lire("/notifications") else { return .seconds(15) }
         if statut == 401 {
-            notificationsPermises = false
+            if notificationsPermises { notificationsPermises = false }
             return .seconds(15)
         }
         guard statut == 200, let l = try? JSONDecoder().decode(ListeNotifications.self, from: corps) else {
             return .seconds(15)
         }
-        notificationsPermises = true
+        if !notificationsPermises { notificationsPermises = true }
         if l.notifications != notifications { notifications = l.notifications }
-        nonLues = l.nonLues
+        if l.nonLues != nonLues { nonLues = l.nonLues }
         return .seconds(15)
     }
 
@@ -156,7 +156,8 @@ final class Annexes {
     private func chargerLiens() async -> Duration? {
         guard let (statut, corps) = try? await acces.lire("/liens") else { return .seconds(15) }
         if statut >= 500 { return .seconds(15) }
-        liens = statut == 200 ? LienSysteme.lire(corps) ?? [] : []
+        let l = statut == 200 ? LienSysteme.lire(corps) ?? [] : []
+        if l != liens { liens = l }
         return nil
     }
 

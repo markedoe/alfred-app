@@ -469,6 +469,7 @@ struct PastillesEtat: View {
                     contenu
                 }
             }
+            .frame(minHeight: 44, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("État des services")
             .accessibilityValue(Self.resume(etat))

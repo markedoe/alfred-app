@@ -71,6 +71,13 @@ struct EnTeteConsole: View {
         }
     }
 
+    /// Une fenêtre s'ouvre d'un coup, comme un `<dialog>` de la console (sans la montée d'une feuille d'iOS).
+    private func ouvrir(_ f: FenetreConsole) {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { fenetre = f }
+    }
+
     private func ligne(serre: Bool) -> some View {
         HStack(spacing: large ? 20 : textes ? 12 : 8) {
             MarqueEnTete(textes: textes, serre: serre, lien: LienMaison.mot(alfred.liaison))
@@ -79,9 +86,9 @@ struct EnTeteConsole: View {
             }
             LienMaison(texte: textes, etiquette: large)
             HStack(spacing: textes ? 10 : 0) {
-                BoutonDocuments(texte: textes) { fenetre = .documents }
+                BoutonDocuments(texte: textes) { ouvrir(.documents) }
                 if alfred.annexes?.notificationsPermises == true {
-                    BoutonNotifications(texte: textes) { fenetre = .notifications }
+                    BoutonNotifications(texte: textes) { ouvrir(.notifications) }
                 }
             }
             if largeur > 760, let v = alfred.voixReconnue {
@@ -90,7 +97,7 @@ struct EnTeteConsole: View {
             Spacer(minLength: serre ? 0 : 6)
             HStack(spacing: textes ? 8 : 0) {
                 BoutonEnTete(icone: "gearshape", libelle: "Réglages", actif: fenetre == .reglages) {
-                    fenetre = .reglages
+                    ouvrir(.reglages)
                 }
                 .accessibilityIdentifier("reglages")
                 if let liens = alfred.annexes?.liens, !liens.isEmpty {
@@ -403,9 +410,11 @@ struct ListeLiens: View {
         .padding(6)
         .frame(minWidth: 230, maxWidth: 320)
         .fixedSize(horizontal: true, vertical: false)
-        .background(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255), in: .rect(cornerRadius: 10))
+        .background {
+            RoundedRectangle(cornerRadius: 10).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
+                .shadow(color: .black.opacity(0.7), radius: 17, y: 14)
+        }
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.acier), lineWidth: 2))
-        .shadow(color: .black.opacity(0.7), radius: 17, y: 14)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Autres systèmes")
         .accessibilityAction(.escape) { ouverte = false }

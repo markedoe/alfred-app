@@ -86,17 +86,16 @@ struct ConsoleVue: View {
                     .transition(.opacity)
                 }
             }
-            .overlay {
-                if let f = fenetre {
-                    Group {
-                        switch f {
-                        case .documents: FenetreDocuments { fenetre = nil }
-                        case .notifications: FenetreNotifications { fenetre = nil }
-                        case .reglages: FenetreReglages { fenetre = nil }
-                        }
+            .fullScreenCover(item: $fenetre) { f in
+                Group {
+                    switch f {
+                    case .documents: FenetreDocuments { fermerFenetre() }
+                    case .notifications: FenetreNotifications { fermerFenetre() }
+                    case .reglages: FenetreReglages { fermerFenetre() }
                     }
-                    .transition(.opacity)
                 }
+                // la console reste devinée sous le voile de la fenêtre
+                .presentationBackground(.clear)
             }
             .onChange(of: fenetre) { _, f in
                 if f != nil {
@@ -107,7 +106,6 @@ struct ConsoleVue: View {
         }
         .animation(.smooth(duration: 0.25), value: ecrire)
         // tests d'interface : aucune transition (l'audit juge l'écran final, pas un fondu)
-        .animation(immobile ? nil : .smooth(duration: 0.2), value: fenetre)
         .animation(immobile ? nil : .smooth(duration: 0.15), value: liensOuverts)
         .sensoryFeedback(trigger: conversation.enConversation) { _, ouvert in ouvert ? .start : .stop }
         .sensoryFeedback(.success, trigger: conversation.reponses)
@@ -118,6 +116,13 @@ struct ConsoleVue: View {
             case nil: nil
             }
         }
+    }
+
+    /// Une fenêtre se ferme d'un coup, comme elle s'est ouverte.
+    private func fermerFenetre() {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { fenetre = nil }
     }
 
     // MARK: - dispositions
@@ -552,9 +557,11 @@ struct SaisieConsole: View {
             .accessibilityLabel("Fermer la saisie")
         }
         .padding(10)
-        .background(Console.carte, in: .rect(cornerRadius: 10))
+        .background {
+            // l'ombre portée par le fond seul (posée sur la carte, chaque texte porterait la sienne)
+            RoundedRectangle(cornerRadius: 10).fill(Console.carte).shadow(color: .black.opacity(0.5), radius: 20, y: 16)
+        }
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.faisceauSombre), lineWidth: 2))
-        .shadow(color: .black.opacity(0.5), radius: 20, y: 16)
         .onAppear { focus = true }
     }
 
@@ -621,9 +628,10 @@ struct CartePiece: View {
             }
         }
         .padding(18)
-        .background(Console.carte, in: .rect(cornerRadius: 12))
+        .background {
+            RoundedRectangle(cornerRadius: 12).fill(Console.carte).shadow(color: .black.opacity(0.5), radius: 20, y: 16)
+        }
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Console.bordureCarte, lineWidth: 2))
-        .shadow(color: .black.opacity(0.5), radius: 20, y: 16)
         .onChange(of: attente, initial: true) { _, a in
             guard a, !reduire, !immobile else {
                 pulse = false
@@ -754,9 +762,11 @@ struct PoigneePanneau: View {
             }
             .foregroundStyle(Color(.champagne))
             .frame(width: 28, height: 88)
-            .background(Console.bouton, in: forme)
+            .background {
+                forme.fill(Console.bouton).shadow(
+                    color: .black.opacity(0.27), radius: 9, x: cote == .assistant ? 5 : -5)
+            }
             .overlay(forme.stroke(Color(.acier), lineWidth: 1.5))
-            .shadow(color: .black.opacity(0.27), radius: 9, x: cote == .assistant ? 5 : -5)
             // la cible déborde de 8 pt de chaque côté (la console : ::after), 44 pt en tout
             .frame(width: 44, height: 88)
             .contentShape(.rect)

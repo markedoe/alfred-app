@@ -1,9 +1,11 @@
 import AlfredKit
 import SwiftUI
 
-/// Une fenêtre de la console (`<dialog>` : Réglages & état, Documents, Notifications) : au centre, sur un voile sombre
-/// et flou, 560 pt de large au plus (470 pour les réglages), son titre champagne et sa croix. Comme la console, elle ne
-/// se ferme que par la croix (ou Échap, ou le geste « retour » de VoiceOver) ; son contenu défile s'il est trop haut.
+/// Une fenêtre de la console (`<dialog>` : Réglages & état, Documents, Notifications) : au centre, sur le voile sombre,
+/// 560 pt de large au plus (470 pour les réglages), son titre champagne et sa croix. Comme la console, elle ne se ferme
+/// que par la croix (ou Échap, ou le geste « retour » de VoiceOver) ; son contenu défile s'il est trop haut. Elle est
+/// présentée en plein écran sur fond transparent (`ConsoleVue`) : une vraie fenêtre d'iOS, la console reste devinée
+/// dessous mais sort de l'accessibilité (VoiceOver ne lit que la fenêtre).
 struct Fenetre<Contenu: View>: View {
     let titre: String
     var largeurMax: CGFloat = 560
@@ -30,6 +32,9 @@ struct Fenetre<Contenu: View>: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($focusTitre)
+                                // un mot plus long que la place (aux grandes tailles) rétrécit au lieu d'être coupé
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.5)
                                 .padding(.top, 11)
                                 // le titre d'abord : c'est le trait qui cède la place
                                 .layoutPriority(1)
@@ -59,11 +64,11 @@ struct Fenetre<Contenu: View>: View {
                     .padding(.leading, 24)
                     .padding([.trailing, .top], 12)
                     .padding(.bottom, 24)
-                    .background(
-                        Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255), in: .rect(cornerRadius: 14)
-                    )
+                    .background {
+                        RoundedRectangle(cornerRadius: 14).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
+                            .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
+                    }
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.acier), lineWidth: 2))
-                    .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
                     .frame(maxWidth: largeurMax)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 16)
@@ -198,11 +203,11 @@ private struct CarteDocument: View {
                     .accessibilityLabel(
                         arme ? "Confirmer la suppression de \(document.nom)" : "Supprimer \(document.nom)")
             }
+            // le résumé du relais tient en trois lignes (sa consigne) : jamais coupé, à toutes les tailles de texte
             Text(resume)
                 .font(.caption)
                 .foregroundStyle(Color(red: 201 / 255, green: 216 / 255, blue: 228 / 255))
                 .lineSpacing(2)
-                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
             if document.alerte != nil {
                 Text("Passage suspect : il s’adresse à un assistant. Alfred et Hermes ne le suivront pas.")

@@ -72,7 +72,9 @@ private struct TitreSection: ViewModifier {
                 .tracking(1.6)
                 .textCase(.uppercase)
                 .foregroundStyle(Color(.champagne))
-                .fixedSize(horizontal: false, vertical: true)
+                // un mot plus long que la place (panneau étroit, grandes tailles) rétrécit au lieu d'être coupé
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
                 .layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
             LinearGradient(colors: [Color(.trait), .clear], startPoint: .leading, endPoint: .trailing)
