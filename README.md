@@ -17,7 +17,10 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
   - Un toucher sur le noyau ouvre une conversation continue : chaque phrase est un tour, et Alfred réécoute après
     avoir répondu.
   - La conversation se ferme d’un toucher, après 90 s de silence, ou quand l’app passe en arrière-plan.
-  - On voit ce qu’Alfred fait (« Allumer · Cuisine ✓ ») et on l’entend répondre pendant que sa voix est synthétisée.
+  - On l’entend répondre pendant que sa voix est synthétisée. Sous chaque réponse, comme la console : sa durée,
+    « llm » ou « intent local », le nombre d’outils, et les « Détails techniques » repliés (chaque outil, ses
+    arguments, fait ou échoué ; jamais le contenu d’un résultat).
+  - Les pièces qu’Alfred nomme dans sa réponse bougent sur la roue ; la voix reconnue par la maison s’affiche 8 s.
 - **Écrire à Alfred**
   - La réponse arrive par écrit. La lecture à voix haute est au choix, dans les réglages.
 - **La maison (la roue)**
@@ -26,7 +29,19 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
     « EXÉCUTION », puis « CONFIRMÉ »).
   - Un état n’est affiché qu’une fois **confirmé par la maison**. Sans confirmation en 8 s, l’échec est visible : il
     n’est jamais supposé ni renvoyé.
-- **L’environnement** : l’extérieur (météo), les pièces mesurées, l’énergie ; les jauges en bas de la console.
+- **L’environnement** : l’extérieur (météo), les pièces mesurées, l’énergie ; les jauges en bas de la console ;
+  l’état des services de la maison (pastilles).
+- **Les fenêtres de l’en-tête, comme la console connectée**
+  - *Documents* : déposer un document à la maison (photothèque, scanner de documents d’iOS, fichiers), le jour
+    qu’il concerne ; la liste et le résumé de chacun ; supprimer en deux temps.
+  - *Notifications* : la copie de celles des téléphones de la personne connectée, marquées lues à l’ouverture.
+  - *Autres systèmes* : les liens que la maison donne selon le compte, ouverts dans Safari.
+  - *Réglages & état* : le modèle, les entités, la dernière réponse, le choix et l’essai du micro ; puis le compte,
+    la lecture des réponses écrites et les engagements de confidentialité.
+- **Mode invités** : quand la maison le demande, l’historique, le résumé, les documents et les notifications sont
+  masqués.
+- **Avec un clavier** (iPad, Mac) : espace pour parler, / pour écrire. En disposition large, une poignée masque ou
+  rend chaque panneau de côté.
 
 ## Architecture
 
