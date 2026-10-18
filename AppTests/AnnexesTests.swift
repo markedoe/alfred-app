@@ -65,7 +65,8 @@ struct AnnexesTests {
         let a = try await Self.pretes()
         await a.marquerLues()
         try await Self.attendre { a.nonLues == 0 }
-        #expect(a.notifications.allSatisfy(\.lu))
+        let toutesLues = a.notifications.allSatisfy { $0.lu }
+        #expect(toutesLues)
         await a.effacerNotifications()
         try await Self.attendre { a.notifications.isEmpty }
         a.suspendre()
