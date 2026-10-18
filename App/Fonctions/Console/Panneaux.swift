@@ -456,24 +456,31 @@ struct PastillesEtat: View {
                 }
             }
             .dynamicTypeSize(...DynamicTypeSize.large)
-            Group {
-                if let kuma = etat.kuma {
-                    Button {
-                        ouvrir(kuma)
-                    } label: {
-                        contenu.frame(minHeight: 44).contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Historique dans Uptime Kuma")
-                } else {
-                    contenu
+            if let kuma = etat.kuma {
+                Button {
+                    ouvrir(kuma)
+                } label: {
+                    contenu.frame(minHeight: 44).contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("État des services")
+                .accessibilityValue(Self.resume(etat))
+                .accessibilityHint("Historique dans Uptime Kuma")
+                .accessibilityIdentifier("etatServices")
+            } else {
+                // un seul élément pour VoiceOver, de 44 pt de haut (le cadre d'un élément se calcule sur son contenu :
+                // des pastilles de 9 pt donneraient une cible de 12 pt)
+                contenu
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .leading) {
+                        Color.clear
+                            .frame(minHeight: 44)
+                            .accessibilityElement()
+                            .accessibilityLabel("État des services")
+                            .accessibilityValue(Self.resume(etat))
+                            .accessibilityIdentifier("etatServices")
+                    }
             }
-            .frame(minHeight: 44, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("État des services")
-            .accessibilityValue(Self.resume(etat))
-            .accessibilityIdentifier("etatServices")
         }
     }
 
