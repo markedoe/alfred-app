@@ -155,6 +155,34 @@ final class ParcoursUITests: XCTestCase {
         capturer(app, "10-etat-des-services")
     }
 
+    /// L'en-tête tient dans la largeur de l'écran : la marque dans la marge, puis chaque bouton entier, d'au moins
+    /// 44 pt, sans chevaucher le précédent, le dernier en deçà de la marge de droite. La CI le passe aussi sur le plus
+    /// étroit des iPhone disponibles, avec la largeur à ne pas dépasser (`ALFRED_LARGEUR_MAX`) : un iPhone trop large
+    /// ferait échouer le test plutôt que de vérifier autre chose.
+    func testEnTete() throws {
+        let app = lancer()
+        attendrePret(app)
+        let largeur = app.frame.width
+        if let max = ProcessInfo.processInfo.environment["ALFRED_LARGEUR_MAX"].flatMap(Double.init) {
+            XCTAssertLessThanOrEqual(largeur, max, "écran de \(largeur) pt : pas le plus étroit des iPhone visés")
+        }
+        capturer(app, "entete-\(Int(largeur))pt")
+        let marque = app.descendants(matching: .any)["marque"]
+        XCTAssertTrue(marque.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(marque.frame.minX, 16 - 0.5, "marque hors de la marge : \(marque.frame)")
+        var precedent = marque.frame
+        for id in ["documents", "notifications", "reglages", "liens", "compte"] {
+            let b = bouton(app, id)
+            XCTAssertTrue(b.exists, id)
+            let f = b.frame
+            XCTAssertGreaterThanOrEqual(min(f.width, f.height), 44 - 0.5, "« \(id) » : cible de \(f.size)")
+            XCTAssertGreaterThanOrEqual(f.minX, precedent.maxX - 0.5, "« \(id) » \(f) chevauche \(precedent)")
+            // la cible du compte déborde de 5 pt dans la marge de 16 pt : son cadre de 34 pt s'arrête à la marge
+            XCTAssertLessThanOrEqual(f.maxX, largeur - 11 + 0.5, "« \(id) » \(f) sort de l'écran de \(largeur) pt")
+            precedent = f
+        }
+    }
+
     /// La disposition large de la console (iPad à l'horizontale, Mac) : l'assistant, la roue, l'environnement et le
     /// bas, côte à côte. Ne tourne que sur iPad (la CI le lance sur un simulateur d'iPad).
     func testDispositionLarge() throws {

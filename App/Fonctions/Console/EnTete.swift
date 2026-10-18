@@ -13,7 +13,9 @@ enum FenetreConsole: String, Identifiable, Sendable {
 ///
 /// Comme la console : jusqu'à 560 pt, les boutons sont des icônes (et le lien un point de couleur) ; au-delà, « Documents »
 /// et « Notifications » s'écrivent ; au-delà de 1100 pt, « LIEN » au-dessus de « Connecté ». Chaque bouton garde une
-/// cible de 44 pt ; quand la place manque (les plus petits iPhone), la marque se resserre.
+/// cible de 44 pt, qui déborde de son cadre dessiné (34 ou 38 pt) : les écarts de la console se mesurent entre les
+/// cadres, pas entre les cibles. Quand la place manque (la console : jusqu'à 380 px), les lettres de la marque se
+/// resserrent.
 struct EnTeteConsole: View {
     @Environment(Alfred.self) private var alfred
     let largeur: CGFloat
@@ -23,6 +25,9 @@ struct EnTeteConsole: View {
 
     private var large: Bool { largeur > 1100 }
     private var textes: Bool { largeur > 560 }
+    private var marge: CGFloat { large ? 24 : 16 }
+    /// Ce dont une cible de 44 pt déborde d'un cadre de 34 pt, de chaque côté.
+    private static let debord: CGFloat = 5
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -30,11 +35,14 @@ struct EnTeteConsole: View {
             ligne(serre: true)
         }
         // jamais plus large que l'écran : un en-tête trop large décalerait toute la console
-        .frame(maxWidth: largeur - (large ? 48 : 32), alignment: .leading)
+        .frame(maxWidth: largeur - marge - (marge - Self.debord), alignment: .leading)
         // une barre de l'app, comme celles du système : à la taille de la console ; un appui long montre un bouton en
         // grand (visionneuse de grand contenu)
         .dynamicTypeSize(...DynamicTypeSize.large)
-        .padding(.horizontal, large ? 24 : 16)
+        // la marge de la console (`#top` : 16 px, 24 au-delà de 1100) jusqu'à la marque à gauche, jusqu'au cadre du
+        // compte à droite (sa cible de 44 pt déborde de 5 pt dans la marge)
+        .padding(.leading, marge)
+        .padding(.trailing, marge - Self.debord)
         .frame(minHeight: textes ? 76 : 68)
         .background(Console.bandeau.opacity(0.95).ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
@@ -78,38 +86,78 @@ struct EnTeteConsole: View {
         withTransaction(t) { fenetre = f }
     }
 
+    @ViewBuilder
     private func ligne(serre: Bool) -> some View {
-        HStack(spacing: large ? 20 : textes ? 12 : 8) {
-            MarqueEnTete(textes: textes, serre: serre, lien: LienMaison.mot(alfred.liaison))
+        if textes {
+            ligneLarge(serre: serre)
+        } else {
+            ligneTelephone(serre: serre)
+        }
+    }
+
+    /// Le téléphone (la console jusqu'à 560 px, mesurée à 390 et 375 px) : la marque, 8, le point du lien, 8, les cadres
+    /// de Documents et Notifications (38 pt, 8 entre eux), au moins 8, puis les trois icônes à droite. Les icônes de
+    /// droite sont à 10 pt l'une de l'autre au lieu de 6 : leurs cibles de 44 pt se touchent.
+    private func ligneTelephone(serre: Bool) -> some View {
+        HStack(spacing: 0) {
+            MarqueEnTete(textes: false, serre: serre, lien: LienMaison.mot(alfred.liaison))
+            LienMaison(texte: false, etiquette: false)
+                .padding(.horizontal, 8)
+            // les cibles de 44 pt débordent de 3 pt leurs cadres de 38 : 8 pt entre les cadres, comme la console
+            HStack(spacing: 8 - 2 * BoutonFenetre.debord) {
+                BoutonDocuments(texte: false) { ouvrir(.documents) }
+                if alfred.annexes?.notificationsPermises == true {
+                    BoutonNotifications(texte: false) { ouvrir(.notifications) }
+                }
+            }
+            .padding(.leading, -BoutonFenetre.debord)
+            // au moins 8 pt entre le cadre de Notifications et celui des réglages (3 + 5 de débord)
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                boutonsDroite
+            }
+        }
+    }
+
+    private func ligneLarge(serre: Bool) -> some View {
+        HStack(spacing: large ? 20 : 12) {
+            MarqueEnTete(textes: true, serre: serre, lien: LienMaison.mot(alfred.liaison))
             if large {
                 Rectangle().fill(Color(.trait)).frame(width: 1, height: 24).accessibilityHidden(true)
             }
-            LienMaison(texte: textes, etiquette: large)
-            HStack(spacing: textes ? 10 : 0) {
-                BoutonDocuments(texte: textes) { ouvrir(.documents) }
+            LienMaison(texte: true, etiquette: large)
+            HStack(spacing: 10) {
+                BoutonDocuments(texte: true) { ouvrir(.documents) }
                 if alfred.annexes?.notificationsPermises == true {
-                    BoutonNotifications(texte: textes) { ouvrir(.notifications) }
+                    BoutonNotifications(texte: true) { ouvrir(.notifications) }
                 }
             }
             if largeur > 760, let v = alfred.voixReconnue {
                 BadgeVoix(voix: v, flottant: false)
             }
             Spacer(minLength: serre ? 0 : 6)
-            HStack(spacing: textes ? 8 : 0) {
-                BoutonEnTete(icone: "gearshape", libelle: "Réglages", actif: fenetre == .reglages) {
-                    ouvrir(.reglages)
-                }
-                .accessibilityIdentifier("reglages")
-                if let liens = alfred.annexes?.liens, !liens.isEmpty {
-                    BoutonEnTete(icone: "square.grid.2x2", libelle: "Autres systèmes", actif: liensOuverts) {
-                        liensOuverts.toggle()
-                    }
-                    .accessibilityIdentifier("liens")
-                    .accessibilityAddTraits(liensOuverts ? .isSelected : [])
-                }
-                compte
+            // 10 pt entre les cadres (la console : 8) ; leurs cibles de 44 pt se touchent
+            HStack(spacing: 0) {
+                boutonsDroite
             }
         }
+    }
+
+    /// Les réglages, les autres systèmes (s'il y en a) et le compte.
+    @ViewBuilder
+    private var boutonsDroite: some View {
+        BoutonEnTete(icone: "gearshape", libelle: "Réglages", actif: fenetre == .reglages) {
+            ouvrir(.reglages)
+        }
+        .accessibilityIdentifier("reglages")
+        if let liens = alfred.annexes?.liens, !liens.isEmpty {
+            BoutonEnTete(icone: "square.grid.2x2", libelle: "Autres systèmes", actif: liensOuverts) {
+                liensOuverts.toggle()
+            }
+            .accessibilityIdentifier("liens")
+            .accessibilityAddTraits(liensOuverts ? .isSelected : [])
+        }
+        compte
     }
 
     /// Le compte : l'icône de sortie (sarcelle, comme la console connectée) et le nom de la personne dessous.
@@ -170,6 +218,7 @@ private struct MarqueEnTete: View {
         }
         .fixedSize()
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("marque")
         .accessibilityLabel("Alfred")
         .accessibilityValue(textes ? "" : "lien : " + lien)
         .accessibilityAddTraits(.isHeader)
@@ -234,8 +283,12 @@ private struct Compteur: View {
 }
 
 /// Un bouton de fenêtre de l'en-tête (Documents, Notifications) : un bouton de la console (fond, bordure acier) ; son
-/// texte et son compteur au-delà de 560 pt, son icône et son compteur en dessous.
+/// texte et son compteur au-delà de 560 pt ; en dessous, son icône et son compteur centrés dans un cadre de 38 × 44 pt
+/// (la console : `width: 38px; padding: 0`), dont le compteur déborde un peu, comme dans la console.
 private struct BoutonFenetre: View {
+    /// Ce dont la cible de 44 pt déborde du cadre de 38 pt, de chaque côté (téléphone).
+    static let debord: CGFloat = 3
+
     let titre: String
     let icone: String
     let texte: Bool
@@ -245,21 +298,33 @@ private struct BoutonFenetre: View {
     let libelle: String
     let action: () -> Void
 
+    @ViewBuilder
+    private var compteur: some View {
+        if nombre > 0 {
+            Compteur(nombre: nombre, fond: fondCompteur, texte: texteCompteur)
+        }
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: texte ? 8 : 4) {
+            Group {
                 if texte {
-                    Text(titre).font(.footnote.weight(.semibold))
+                    HStack(spacing: 8) {
+                        Text(titre).font(.footnote.weight(.semibold))
+                        compteur
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 34)
                 } else {
-                    Image(systemName: icone).font(.subheadline.weight(.medium))
-                }
-                if nombre > 0 {
-                    Compteur(nombre: nombre, fond: fondCompteur, texte: texteCompteur)
+                    HStack(spacing: 6) {
+                        Image(systemName: icone).font(.subheadline.weight(.medium))
+                        compteur
+                    }
+                    .fixedSize()
+                    .frame(width: 44 - 2 * Self.debord, height: 44)
                 }
             }
             .foregroundStyle(Color(.glace))
-            .padding(.horizontal, texte ? 12 : 4)
-            .frame(minWidth: texte ? nil : 38, minHeight: 34)
             .background(Console.bouton, in: .rect(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.acier), lineWidth: 1.5))
             .frame(minWidth: 44, minHeight: 44)
