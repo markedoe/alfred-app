@@ -82,7 +82,7 @@ swift test --package-path Paquets/AlfredKit
 
 | Workflow | Quand | Quoi |
 |---|---|---|
-| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple en clair et en sombre (captures jointes) |
+| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift et des workflows |
 | `TestFlight` | À la main, ou sur une étiquette `v*` | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes ; à la main, « envoyer » décoché : archive et export signés seulement |
 | `Certificats` | À la main | Inventaire des certificats de signature de l’équipe (sans aucun nom), ou création du certificat unique de la CI |

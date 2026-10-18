@@ -24,6 +24,10 @@ App/Ressources/Configuration.plist
 *.pem
 AuthKey_*.p8
 
+# Fichiers compilés de Python (scripts/outils)
+__pycache__/
+*.pyc
+
 # Systèmes
 .DS_Store
 .swiftpm/
