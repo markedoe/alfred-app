@@ -316,8 +316,9 @@ private struct BoutonFenetre: View {
                     .padding(.horizontal, 12)
                     .frame(minHeight: 34)
                 } else {
+                    // l'icône de la console : un carré de 18 pt, son tracé d'environ 11 × 14 pt
                     HStack(spacing: 6) {
-                        Image(systemName: icone).font(.subheadline.weight(.medium))
+                        Image(systemName: icone).font(.footnote.weight(.medium)).frame(width: 18, height: 18)
                         compteur
                     }
                     .fixedSize()
