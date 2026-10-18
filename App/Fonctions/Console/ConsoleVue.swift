@@ -747,7 +747,7 @@ struct PoigneePanneau: View {
                 }
                 .opacity(0.7)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.subheadline.weight(.bold))
                     .rotationEffect(.degrees(pointeAGauche ? 180 : 0))
             }
             .foregroundStyle(Color(.champagne))

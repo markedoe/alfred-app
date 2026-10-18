@@ -39,7 +39,7 @@ struct Fenetre<Contenu: View>: View {
                                 .accessibilityHidden(true)
                             Button(action: fermer) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 18, weight: .semibold))
+                                    .font(.title3.weight(.semibold))
                                     .foregroundStyle(Color(.glace))
                                     .frame(width: 44, height: 44)
                                     .overlay(

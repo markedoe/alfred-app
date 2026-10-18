@@ -20,6 +20,9 @@ struct EnTeteConsole: View {
     @Binding var fenetre: FenetreConsole?
     @Binding var liensOuverts: Bool
     @State private var quitter = false
+    /// « MANOR COMMAND » : 11 pt, 9 sur téléphone (la console : `#brand-sub`), avec la taille du texte (plafonnée ici).
+    @ScaledMetric(relativeTo: .caption2) private var sousMarque: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption2) private var sousMarqueTelephone: CGFloat = 9
 
     private var large: Bool { largeur > 1100 }
     private var textes: Bool { largeur > 560 }
@@ -110,7 +113,7 @@ struct EnTeteConsole: View {
                 .tracking(serre ? 2.2 : textes ? 6 : 4)
                 .foregroundStyle(Color(.glace))
             Text("MANOR COMMAND")
-                .font(.system(size: textes ? 11 : 9, weight: .semibold))
+                .font(.system(size: textes ? sousMarque : sousMarqueTelephone, weight: .semibold))
                 .tracking(serre ? 1 : 1.6)
                 .foregroundStyle(Color(.champagne))
         }
@@ -131,7 +134,7 @@ struct EnTeteConsole: View {
                 }
                 if let nom = alfred.moi?.nom, !nom.isEmpty {
                     Text(nom)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color(.sarcelle))
                         .lineLimit(1)
                         .fixedSize()
@@ -163,7 +166,7 @@ private struct CadreIcone<Contenu: View>: View {
 
     var body: some View {
         contenu
-            .font(.system(size: 16, weight: .medium))
+            .font(.callout.weight(.medium))
             .foregroundStyle(actif ? Color(.glace) : couleur)
             .frame(width: 34, height: 34)
             .overlay(
@@ -202,7 +205,7 @@ private struct Compteur: View {
 
     var body: some View {
         Text("\(nombre)")
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .font(.caption2.weight(.bold).monospaced())
             .foregroundStyle(texte)
             .padding(.horizontal, 6)
             .frame(minWidth: 20, minHeight: 20)
@@ -227,9 +230,9 @@ private struct BoutonFenetre: View {
         Button(action: action) {
             HStack(spacing: texte ? 8 : 4) {
                 if texte {
-                    Text(titre).font(.system(size: 13, weight: .semibold))
+                    Text(titre).font(.footnote.weight(.semibold))
                 } else {
-                    Image(systemName: icone).font(.system(size: 15, weight: .medium))
+                    Image(systemName: icone).font(.subheadline.weight(.medium))
                 }
                 if nombre > 0 {
                     Compteur(nombre: nombre, fond: fondCompteur, texte: texteCompteur)
@@ -292,7 +295,7 @@ struct BadgeVoix: View {
 
     var body: some View {
         Text(voix.texte)
-            .font(.system(size: flottant ? 12 : 13))
+            .font(flottant ? .caption : .footnote)
             .foregroundStyle(voix.incertaine ? Color(.sodium) : Color(.sarcelle))
             .lineLimit(1)
             .fixedSize()
@@ -325,7 +328,7 @@ struct LienMaison: View {
                 Circle().fill(couleur).frame(width: texte ? 8 : 10, height: texte ? 8 : 10)
                 if texte {
                     Text(mot)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(.footnote.weight(.semibold).monospaced())
                         .foregroundStyle(couleur)
                         .fixedSize()
                 }

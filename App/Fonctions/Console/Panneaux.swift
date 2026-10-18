@@ -165,7 +165,7 @@ private struct DetailsTechniques: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrowtriangle.right.fill")
-                        .font(.system(size: 8))
+                        .imageScale(.small)
                         .rotationEffect(.degrees(ouverts ? 90 : 0))
                     Text("Détails techniques")
                 }
@@ -436,6 +436,8 @@ struct PanneauEnvironnement: View {
 struct PastillesEtat: View {
     @Environment(Alfred.self) private var alfred
     @Environment(\.openURL) private var ouvrir
+    /// Les noms des groupes : 10 pt comme la console, avec la taille du texte (plafonnée : un instrument).
+    @ScaledMetric(relativeTo: .caption2) private var tailleNom: CGFloat = 10
 
     var body: some View {
         if let etat = alfred.annexes?.etat, !etat.groupes.isEmpty {
@@ -443,7 +445,7 @@ struct PastillesEtat: View {
                 ForEach(etat.groupes) { g in
                     HStack(spacing: 4) {
                         Text(g.nomCourt)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: tailleNom, weight: .semibold))
                             .tracking(0.8)
                             .textCase(.uppercase)
                             .foregroundStyle(Color(.texteSecondaire))
