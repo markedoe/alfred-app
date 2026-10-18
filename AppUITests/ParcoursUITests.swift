@@ -237,73 +237,6 @@ final class ParcoursUITests: XCTestCase {
         }
     }
 
-    /// Le plus faible contraste (WCAG) mesuré sur une capture de l'écran, parmi ses textes et boutons visibles : pour
-    /// chacun, le fond est la couleur la plus fréquente sur le pourtour de son cadre, le texte la couleur (au moins 2 %
-    /// des pixels) la plus contrastée avec ce fond. nil si la capture ne se lit pas.
-    private static func contrasteMinimal(_ app: XCUIApplication) -> (ratio: Double, texte: String)? {
-        guard let image = app.screenshot().image.cgImage else { return nil }
-        let (l, h) = (image.width, image.height)
-        var pixels = [UInt8](repeating: 0, count: l * h * 4)
-        let lu = pixels.withUnsafeMutableBytes { tampon -> Bool in
-            guard
-                let c = CGContext(
-                    data: tampon.baseAddress, width: l, height: h, bitsPerComponent: 8, bytesPerRow: l * 4,
-                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-            else { return false }
-            c.draw(image, in: CGRect(x: 0, y: 0, width: l, height: h))
-            return true
-        }
-        guard lu else { return nil }
-        let echelle = CGFloat(l) / max(1, app.frame.width)
-        // une couleur, ramenée à des pas de 8 (les bords lissés d'un même texte se regroupent)
-        func couleur(_ x: Int, _ y: Int) -> Int {
-            let i = (y * l + x) * 4
-            return (Int(pixels[i]) >> 3) << 10 | (Int(pixels[i + 1]) >> 3) << 5 | Int(pixels[i + 2]) >> 3
-        }
-        func luminance(_ c: Int) -> Double {
-            func canal(_ v: Int) -> Double {
-                let s = Double(v * 8 + 4) / 255
-                return s <= 0.03928 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
-            }
-            return 0.2126 * canal(c >> 10) + 0.7152 * canal((c >> 5) & 31) + 0.0722 * canal(c & 31)
-        }
-        func rapport(_ a: Int, _ b: Int) -> Double {
-            let (la, lb) = (luminance(a), luminance(b))
-            return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
-        }
-        var pire: (ratio: Double, texte: String)?
-        let elements = app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex
-        for e in elements where e.exists && e.isHittable && !e.label.isEmpty {
-            let f = e.frame
-            let x0 = max(0, Int(f.minX * echelle))
-            let x1 = min(l - 1, Int(f.maxX * echelle))
-            let y0 = max(0, Int(f.minY * echelle))
-            let y1 = min(h - 1, Int(f.maxY * echelle))
-            guard x1 - x0 > 4, y1 - y0 > 4 else { continue }
-            var bord: [Int: Int] = [:]
-            for x in x0...x1 {
-                bord[couleur(x, y0), default: 0] += 1
-                bord[couleur(x, y1), default: 0] += 1
-            }
-            for y in y0...y1 {
-                bord[couleur(x0, y), default: 0] += 1
-                bord[couleur(x1, y), default: 0] += 1
-            }
-            guard let fond = bord.max(by: { $0.value < $1.value })?.key else { continue }
-            var dedans: [Int: Int] = [:]
-            for y in y0...y1 { for x in x0...x1 { dedans[couleur(x, y), default: 0] += 1 } }
-            let seuil = (x1 - x0 + 1) * (y1 - y0 + 1) / 50
-            guard
-                let texte = dedans.filter({ $0.value >= seuil && $0.key != fond }).keys.max(by: {
-                    rapport($0, fond) < rapport($1, fond)
-                })
-            else { continue }
-            let r = rapport(texte, fond)
-            if r < (pire?.ratio ?? .infinity) { pire = (r, e.label) }
-        }
-        return pire
-    }
-
     private static let engagementMicro =
         "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan."
 
@@ -339,9 +272,16 @@ final class ParcoursUITests: XCTestCase {
                 XCTAssertTrue(bouton(app, "fermerFenetre").waitForExistence(timeout: 5))
             default: vue(app, "pieces")
             }
-            // mesuré avant l'audit (une capture pendant l'audit pourrait le perturber)
-            let mesure = Self.contrasteMinimal(app)
+            // l'audit relève, le tri vient après (une capture ou une requête pendant l'audit le ralentit)
+            var signales: [XCUIAccessibilityAuditIssue] = []
             try app.performAccessibilityAudit(for: types) { probleme in
+                signales.append(probleme)
+                return true
+            }
+            // les contrastes contestés se mesurent sur UNE capture de l'écran audité
+            var capture: Capture?
+            if signales.contains(where: { $0.auditType == .contrast }) { capture = Capture(app) }
+            for probleme in signales {
                 let description =
                     "\(ecran) · \(probleme.compactDescription) · "
                     + (probleme.element.map { "« \($0.label) » \(Int($0.frame.minY))…\(Int($0.frame.maxY)) pt" }
@@ -351,22 +291,25 @@ final class ParcoursUITests: XCTestCase {
                     ecartes.append("vérifié en très grand texte · " + description)
                 } else if sansElementEcarte, probleme.auditType == .textClipped, probleme.element == nil {
                     ecartes.append("sans élément, disposition large · " + description)
-                } else if probleme.auditType == .contrast, probleme.element == nil, let m = mesure, m.ratio >= 4.5 {
-                    // un contraste que l'audit ne situe pas : écarté seulement si TOUS les textes visibles de l'écran,
-                    // mesurés sur la capture, atteignent 4,5:1 (WCAG AA pour un petit texte) ; le plus faible est noté
-                    ecartes.append(
-                        "sans élément, contraste mesuré sur la capture ≥ 4,5:1 (le plus faible : "
-                            + String(format: "%.1f", m.ratio) + ":1, « \(m.texte) ») · " + description)
                 } else if probleme.auditType == .contrast, let e = probleme.element,
                     !e.isHittable || Self.enPartieCache(e, dans: app)
                 {
                     // hors de la vue : sous le bord d'un panneau qui défile, ou sous la carte d'une pièce ; un texte
                     // qu'on ne voit pas ne se juge pas sur ce qui le recouvre (il l'est une fois amené dans la vue)
                     ecartes.append("hors de la vue · " + description)
+                } else if probleme.auditType == .contrast, let c = capture,
+                    let mesure = probleme.element.map({ e in c.contraste(e.frame).map { ($0, e.label) } })
+                        ?? c.minimum(app),
+                    mesure.0 >= 4.5
+                {
+                    // démenti par la mesure : le texte visé (ou, sans élément, TOUS les textes et boutons visibles) atteint
+                    // 4,5:1 sur la capture (WCAG AA pour un petit texte) ; la mesure est notée
+                    ecartes.append(
+                        "contraste mesuré sur la capture : " + String(format: "%.1f", mesure.0) + ":1 (« \(mesure.1) »)"
+                            + " · " + description)
                 } else {
                     problemes.append(description)
                 }
-                return true
             }
             capturer(app, "audit-\(ecran)")
         }
@@ -376,5 +319,89 @@ final class ParcoursUITests: XCTestCase {
         add(note)
         XCTAssertTrue(
             problemes.isEmpty, "\(problemes.count) problème(s) d'accessibilité :\n" + problemes.joined(separator: "\n"))
+    }
+}
+
+/// Une capture de l'écran, lue pixel par pixel : le contraste (WCAG) d'un texte dans son cadre. Le fond est la couleur la
+/// plus fréquente sur le pourtour du cadre ; le texte, la couleur (au moins 2 % des pixels) la plus contrastée avec ce
+/// fond. Les couleurs sont ramenées à des pas de 8 (les bords lissés d'un même texte se regroupent).
+@MainActor
+private struct Capture {
+    private let pixels: [UInt8]
+    private let largeur: Int
+    private let hauteur: Int
+    private let echelle: CGFloat
+
+    init?(_ app: XCUIApplication) {
+        guard let image = app.screenshot().image.cgImage else { return nil }
+        let (l, h) = (image.width, image.height)
+        var p = [UInt8](repeating: 0, count: l * h * 4)
+        let lu = p.withUnsafeMutableBytes { tampon -> Bool in
+            guard
+                let c = CGContext(
+                    data: tampon.baseAddress, width: l, height: h, bitsPerComponent: 8, bytesPerRow: l * 4,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+            else { return false }
+            c.draw(image, in: CGRect(x: 0, y: 0, width: l, height: h))
+            return true
+        }
+        guard lu else { return nil }
+        pixels = p
+        largeur = l
+        hauteur = h
+        echelle = CGFloat(l) / max(1, app.frame.width)
+    }
+
+    /// Le plus faible contraste parmi les textes et boutons visibles de l'écran.
+    func minimum(_ app: XCUIApplication) -> (Double, String)? {
+        var pire: (Double, String)?
+        let elements = app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex
+        for e in elements where e.exists && e.isHittable && !e.label.isEmpty {
+            guard let r = contraste(e.frame) else { continue }
+            if r < (pire?.0 ?? .infinity) { pire = (r, e.label) }
+        }
+        return pire
+    }
+
+    func contraste(_ cadre: CGRect) -> Double? {
+        let x0 = max(0, Int(cadre.minX * echelle))
+        let x1 = min(largeur - 1, Int(cadre.maxX * echelle))
+        let y0 = max(0, Int(cadre.minY * echelle))
+        let y1 = min(hauteur - 1, Int(cadre.maxY * echelle))
+        guard x1 - x0 > 4, y1 - y0 > 4 else { return nil }
+        var bord: [Int: Int] = [:]
+        for x in x0...x1 {
+            bord[couleur(x, y0), default: 0] += 1
+            bord[couleur(x, y1), default: 0] += 1
+        }
+        for y in y0...y1 {
+            bord[couleur(x0, y), default: 0] += 1
+            bord[couleur(x1, y), default: 0] += 1
+        }
+        guard let fond = bord.max(by: { $0.value < $1.value })?.key else { return nil }
+        var dedans: [Int: Int] = [:]
+        for y in y0...y1 { for x in x0...x1 { dedans[couleur(x, y), default: 0] += 1 } }
+        let seuil = (x1 - x0 + 1) * (y1 - y0 + 1) / 50
+        let candidats = dedans.filter { $0.value >= seuil && $0.key != fond }.keys
+        guard let texte = candidats.max(by: { Self.rapport($0, fond) < Self.rapport($1, fond) }) else { return nil }
+        return Self.rapport(texte, fond)
+    }
+
+    private func couleur(_ x: Int, _ y: Int) -> Int {
+        let i = (y * largeur + x) * 4
+        return (Int(pixels[i]) >> 3) << 10 | (Int(pixels[i + 1]) >> 3) << 5 | Int(pixels[i + 2]) >> 3
+    }
+
+    private static func luminance(_ c: Int) -> Double {
+        func canal(_ v: Int) -> Double {
+            let s = Double(v * 8 + 4) / 255
+            return s <= 0.03928 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * canal(c >> 10) + 0.7152 * canal((c >> 5) & 31) + 0.0722 * canal(c & 31)
+    }
+
+    private static func rapport(_ a: Int, _ b: Int) -> Double {
+        let (la, lb) = (luminance(a), luminance(b))
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
 }
