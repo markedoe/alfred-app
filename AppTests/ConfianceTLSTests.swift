@@ -23,8 +23,29 @@ enum CertificatsDeTest {
     static let autoriteSansUsage = Data(base64Encoded: "MIIDSzCCAjOgAwIBAgIUQtxUSR5N7d4a/D3W/Jt0QndhkDYwDQYJKoZIhvcNAQELBQAwNTEkMCIGA1UEAwwbQXV0b3JpdGUgZGUgdGVzdCBzYW5zIHVzYWdlMQ0wCwYDVQQKDARUZXN0MB4XDTI2MTAxNzE5MTcxMFoXDTM2MTAxNDE5MTcxMFowNTEkMCIGA1UEAwwbQXV0b3JpdGUgZGUgdGVzdCBzYW5zIHVzYWdlMQ0wCwYDVQQKDARUZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlx8Id6KyLTBIM3+mTpdC/Z58Gc6eaha04eRdk5POnPPVkMIKudg6+CTvyB0eV7sljpPNliUwEpk05aljOATmo+fkGEFgdXmsB4eeNJAPwgoo0dhBV0X+zaq3qdJfc0pyiIUeelWT1FrhTgCyYf9LA8dhFW9ytebyVn2m9SamfOHddXPRKPiEoDgLh/ISDcc/ftv/lxtu4rEkA5LlPLXtY7EWNBwnESIebNwECz5hHiSiBkkZ8GhGdBwI6wu84EuFuhJwfOxJtZxB46fU2ZJnGEI3l/GrIsrwE879n3o8YfO87MkFR+ywIngD1TbiKaMAgg6BUpz8RygoQo+NiztEOQIDAQABo1MwUTAdBgNVHQ4EFgQUtQKqQox2C//4/MMF7FFW8vZSv0UwHwYDVR0jBBgwFoAUtQKqQox2C//4/MMF7FFW8vZSv0UwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAB9Pm3FDVNehZ/1ApMcvUIFxkqYYlXmZiKJMsXRnmHE7sYYgeAdqH6w7opVP0dIKPiurAnHsfXYEKxblEQur8uiXqcrQnxw+6Odldwc6uWhlecTK9uTsbPBrjB9n3IZcc8YPYkzF7Di571M5q78EO7WOY0BqzbQBgiiOK/YNSAgbv01cb8HdVO+0IVx6uLE/WZ2huz4uoqBNIYZ4OH0LaZVxQ0TQSwf8kv1/BODsafoFH1rxE2I9lTGKRJgZALucYF4TxkVVmDQskXq1N3UDw7XnQP0gUmfLVUe3PkYX6Ft0ok0mrcEPemmkL7ImlMh7uQxDYnmBGwbE6UmZy4jB9Nw==")!
     // swift-format-ignore
     static let serveurJoker = Data(base64Encoded: "MIIDjjCCAnagAwIBAgIUKslJLT2Ly8VlVTwVGBVkH6lu5skwDQYJKoZIhvcNAQELBQAwNTEkMCIGA1UEAwwbQXV0b3JpdGUgZGUgdGVzdCBzYW5zIHVzYWdlMQ0wCwYDVQQKDARUZXN0MB4XDTI2MTAxNzE5MTcxMFoXDTI5MDExOTE5MTcxMFowFzEVMBMGA1UEAwwMYXV0cmUubGFuLjl6MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwZ+u6F0iJk0SkfZCVu2zweoP992/Fz/rHRnsY3+y1SydSe9QerHrYhdTwDFpRMGBfqjStX5wKoABiwU/qdP8zrnFBCPCC4lAaM72WJIgUBNqk5c62ra6pCn0GSdRWR3GYIQht1lwSH0ucm2isoxIJIOtZARx7eQkbBEPwubkuViSeJzt7feIExq4+/84viPvTy1VE05d4oGJ4u1YC6bZHVj9i74/PimCmLlNmEPel4XzeUH3tdjv1DSWHK/Gnd5KgZLk2SsO89Iocqy8Zj2UCdLQy2EWq9adE1SMRIEtKVw61vMbME8hidin9mJWHHnEvk4pCFeeU2Nvf3HTW8fgiwIDAQABo4GzMIGwMEwGA1UdEQRFMEOHBMAAAgqHBH8AAAGCDGF1dHJlLmxhbi45eoIFYXV0cmWCC2F1dHJlLmxvY2Fsgglsb2NhbGhvc3SCCCoubGFuLjl6MAsGA1UdDwQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcDATAdBgNVHQ4EFgQU+5tNiq2g0iaXxWpuEhaS6GSCvWcwHwYDVR0jBBgwFoAUtQKqQox2C//4/MMF7FFW8vZSv0UwDQYJKoZIhvcNAQELBQADggEBAAUdCOhKiYNbmG3dbV5BE/z/fPAUSOkqF8mUipDkSYOhQI+bsZSuE49OenuUD+xtHxmp34rizwpNC2dHGmOAEFO736EG+wgpZat1eZWXW3USGNIdu99HhT0K1FRpag0SKHlkdw1wNtCFw0Q0/ARaTBw5CR/4ExgwFb/LmELXSc/ZTNbXDTZNviH0VuIrv6eVm24bIPAhG1JusM6skDIC1xxksfVL5CdNvXGNamAnZip4p46dRxufvcm4XvmhxwRPhm2frHrpWFy+TsxhFFGMjq/iHDVPaXzv1AyZsKI4AtBZumtDa5mTtVNtNxit65cRsfKUFKMwiEfY2yVh3yHQ8lQ=")!
+    /// Le remplacement d'une autorité sans rien couper (19.10.2026, clés détruites) : une ANCIENNE autorité (celle des
+    /// versions déjà installées et des navigateurs), une autorité NEUTRE (celle des nouvelles versions), le PONT (la
+    /// neutre, même nom et même clé, signée par l'ancienne) et un serveur `*.lan.9z` signé par la neutre, qui envoie
+    /// le pont avec son certificat.
+    // swift-format-ignore
+    static let autoriteAncienne = Data(base64Encoded: "MIIDRzCCAi+gAwIBAgIUT6WaOvFIq24eLuwXq+L6N4aKkPowDQYJKoZIhvcNAQELBQAwMzEiMCAGA1UEAwwZQXV0b3JpdGUgYW5jaWVubmUgZGUgdGVzdDENMAsGA1UECgwEVGVzdDAeFw0yNjEwMTkwNzQ4MzRaFw0zNjEwMTYwNzQ4MzRaMDMxIjAgBgNVBAMMGUF1dG9yaXRlIGFuY2llbm5lIGRlIHRlc3QxDTALBgNVBAoMBFRlc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDm/xkwaDbhgGvBIcBUQFsufNYrf+RTzhkZL8x9DDSntd2w0tmUwQ0/dZ0J9MmxWLMpCeyiS5qRlguT3y2o2SAS5lzVJokCAkaIsURMQHxf1ZTAFfUzsPakhbDxeQwdretDVhphpkWjvf7S4kB2zfP1N5S2MePr56y3K33DXjoNd4pxE6xqN3WjZzICc5Nvs+CAUr42R6NxoC+mbiFFumvg4LC9ILnbSQx90zjKqboAuun2/WMdL90jbMxxm0YT5CkONT4yavIAbafgkWpEvnUP1Ua3fVSulqBMdQMHiOWLilz4KAF0B++hj5EcNHNf3hutKEhkx6fzDNQ7d2OO8tjrAgMBAAGjUzBRMB0GA1UdDgQWBBQf8iZK93bbxFMvCW7UuS8pHoqc9jAfBgNVHSMEGDAWgBQf8iZK93bbxFMvCW7UuS8pHoqc9jAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQDRZDGjpz5DemlKCLegUHJPH4wHVppv8obdYvyhP25oG1Fv2r9Ja7OMghjIbsyD8eIOLN4o8AJNt6CwxbbDXmy7/Qsbv/nQ+xN4hQftbm0gqknDzhgYz/ZMIPAzyXthraFof9AayZgxA9RAJfOmJK4Y6f3yNGV3juT3SVnGZXsojZbtHN5ip06FvVrVoLBAmKmENIC5mTQj2onzlHi9oT92tjArxZnDyLj718Z0uVLxQZ9jK9BALUjMgjXfD68sKQI5rh/p3nVJU49WX6drWkNP+G0BdHYcbHqMX/Zh+pZoE1V3GnyEeVpHnpQ7ROexXcy7AVO5P8W1fUSQw9UY+SHQ")!
+    // swift-format-ignore
+    static let autoriteNeutre = Data(base64Encoded: "MIIBrDCCAVKgAwIBAgIUIYWtMxBeM55JA27Kp36rqM9Q0WowCgYIKoZIzj0EAwIwIjEgMB4GA1UEAwwXQXV0b3JpdGUgbmV1dHJlIGRlIHRlc3QwHhcNMjYxMDE5MDc0ODM0WhcNMzYxMDE2MDc0ODM0WjAiMSAwHgYDVQQDDBdBdXRvcml0ZSBuZXV0cmUgZGUgdGVzdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABFIUndYPG6ztxFf6Fce11+KUCGXnDiecN0qWjsBxqijqTsi+41zXn1R4f7FxR2Gb7E08u57wyhDM0MFFll9lcNqjZjBkMB8GA1UdIwQYMBaAFG1+JjyU0yVmehGgBtGA2kMqgxrhMBIGA1UdEwEB/wQIMAYBAf8CAQAwDgYDVR0PAQH/BAQDAgEGMB0GA1UdDgQWBBRtfiY8lNMlZnoRoAbRgNpDKoMa4TAKBggqhkjOPQQDAgNIADBFAiEAzTAQqx5DwpFmHc5XyqecrMZhP1Avc6WNW4VYl+j6ob0CIFxqX+LLUaI4QwpO+UFFVDkY9HUIn+9FXkvJtDTV/ArB")!
+    // swift-format-ignore
+    static let pont = Data(base64Encoded: "MIICejCCAWKgAwIBAgIQOdx1wvINKfA6t7/zD3jMUzANBgkqhkiG9w0BAQsFADAzMSIwIAYDVQQDDBlBdXRvcml0ZSBhbmNpZW5uZSBkZSB0ZXN0MQ0wCwYDVQQKDARUZXN0MB4XDTI2MTAxOTA3NDgzNFoXDTM2MTAxNjA3NDgzNFowIjEgMB4GA1UEAwwXQXV0b3JpdGUgbmV1dHJlIGRlIHRlc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARSFJ3WDxus7cRX+hXHtdfilAhl5w4nnDdKlo7Acaoo6k7IvuNc159UeH+xcUdhm+xNPLue8MoQzNDBRZZfZXDao2YwZDASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUbX4mPJTTJWZ6EaAG0YDaQyqDGuEwHwYDVR0jBBgwFoAUH/ImSvd228RTLwlu1LkvKR6KnPYwDQYJKoZIhvcNAQELBQADggEBAI9PZWdh3ue2bnzP9N2ntFbYXw75oUe4onBvutjWYkhXi4YmIlaaOMexmGJ3KewdRI7mYuIIygonCbiBt0MVooWHiX4TdnhBWIY6iTS0pSof43Mrxu2uRm0Ux9hs8gkjnAr/JXrWgPL2Ilhpaa+su2AJOY3aA939I2Nq84TtCfezqZjWJghttnUr+w1yBlkZ/fA8gNb7InYU52a0tlR4R7zwZQyaPG6HjfcTat0tClvGGT0ocBf5BS7G4W8jtlIU/JVz4k3+kQrDKPrlJEJ5rSItXluFbSQOAQK4s3NDUC2UUCK+R5x0e94/6Z7SHUhr9qIQIEVorw73bXEQqqOXYRw=")!
+    // swift-format-ignore
+    static let serveurNeutre = Data(base64Encoded: "MIIB5jCCAYygAwIBAgIRAPJcPXVvSjnnNZbSceq/a+owCgYIKoZIzj0EAwIwIjEgMB4GA1UEAwwXQXV0b3JpdGUgbmV1dHJlIGRlIHRlc3QwHhcNMjYxMDE5MDc0ODM1WhcNMjkwMTIxMDc0ODM1WjAXMRUwEwYDVQQDDAxhdXRyZS5sYW4uOXowWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARgPFHs2Mwd9ufOSy7muawZ8KjdLeyrZNnExOu4GwTQ5taiKXGCV6SkXrc8jRaQ81rdwPSmzC0lkXh4jzf+EqP5o4GtMIGqMAkGA1UdEwQCMAAwOAYDVR0RBDEwL4cEwAACCocEfwAAAYIMYXV0cmUubGFuLjl6gglsb2NhbGhvc3SCCCoubGFuLjl6MA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDATAdBgNVHQ4EFgQUyRJsmZydLZzJ/f85JJFhbpA+U+cwHwYDVR0jBBgwFoAUbX4mPJTTJWZ6EaAG0YDaQyqDGuEwCgYIKoZIzj0EAwIDSAAwRQIhAPueOq60w2LgjiS/XzXKq0b7rqBxoMIKKlbjXr1aZ87AAiALSR88fxjFDz7Y68eCtYI9iBxpUSzVJDhh31AdNxAWVw==")!
     /// Une date où le certificat du serveur est valable.
     static let dateValide = Date(timeIntervalSince1970: 1_800_000_000)  // 15.01.2027
+
+    /// La confiance d'une chaîne envoyée par le serveur (son certificat, puis ses intermédiaires).
+    static func confiance(hote: String, chaine: [Data]) -> SecTrust {
+        let certificats = chaine.map { SecCertificateCreateWithData(nil, $0 as CFData)! }
+        var t: SecTrust?
+        SecTrustCreateWithCertificates(certificats as CFArray, SecPolicyCreateSSL(true, hote as CFString), &t)
+        SecTrustSetVerifyDate(t!, dateValide as CFDate)
+        return t!
+    }
 
     static func confiance(hote: String, serveur: Data = CertificatsDeTest.serveur) -> SecTrust {
         let feuille = SecCertificateCreateWithData(nil, serveur as CFData)!
@@ -68,6 +89,25 @@ struct ConfianceTLSTests {
             let autre = CertificatsDeTest.confiance(hote: hote, serveur: CertificatsDeTest.serveurJoker)
             #expect(ConfianceTLS.refus(autre, hote: hote, ancre: ancre) != nil, "\(hote)")
         }
+    }
+
+    @Test("Autorité remplacée sans coupure : la neutre et l'ancienne acceptent le serveur qui envoie le pont")
+    func autoriteRemplacee() {
+        let hote = "relais.lan.9z"
+        let avecPont = CertificatsDeTest.confiance(
+            hote: hote, chaine: [CertificatsDeTest.serveurNeutre, CertificatsDeTest.pont])
+        let sansPont = CertificatsDeTest.confiance(hote: hote, chaine: [CertificatsDeTest.serveurNeutre])
+        let neutre = SecCertificateCreateWithData(nil, CertificatsDeTest.autoriteNeutre as CFData)!
+        let ancienne = SecCertificateCreateWithData(nil, CertificatsDeTest.autoriteAncienne as CFData)!
+        // les nouvelles versions (autorité neutre), avec ou sans le pont
+        #expect(ConfianceTLS.refus(avecPont, hote: hote, ancre: neutre) == nil)
+        #expect(ConfianceTLS.refus(sansPont, hote: hote, ancre: neutre) == nil)
+        // les versions déjà installées (ancienne autorité) : acceptées grâce au pont, refusées sans lui
+        let avecPont2 = CertificatsDeTest.confiance(
+            hote: hote, chaine: [CertificatsDeTest.serveurNeutre, CertificatsDeTest.pont])
+        let sansPont2 = CertificatsDeTest.confiance(hote: hote, chaine: [CertificatsDeTest.serveurNeutre])
+        #expect(ConfianceTLS.refus(avecPont2, hote: hote, ancre: ancienne) == nil)
+        #expect(ConfianceTLS.refus(sansPont2, hote: hote, ancre: ancienne) != nil)
     }
 
     @Test("Un refus garde le code de Security qui l'explique")
