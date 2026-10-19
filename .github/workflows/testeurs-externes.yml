@@ -1,0 +1,117 @@
+# TestFlight pour les testeurs externes (la famille, invitée par e-mail sans être membre du compte App Store Connect),
+# par l'API App Store Connect : `scripts/outils/testflight_externe.py`. À la main, ou appelé par « TestFlight » après
+# chaque envoi (action « soumettre »).
+#   etat       ce qui est en place (groupes, testeurs par état, informations de test, dernières fabrications)
+#   preparer   groupe externe sans lien public, informations de test, contact de l'examen d'Apple
+#   soumettre  une fabrication (son numéro) : traitement d'Apple attendu, « À tester », groupe externe, examen d'Apple
+#   inviter    les testeurs du secret ASC_TESTEURS dans le groupe externe
+# Le journal est public : aucune donnée personnelle n'y paraît (contact et testeurs restent dans les secrets, masqués
+# ici champ par champ ; le script n'écrit que des états et des nombres). Les entrées s'affichent EN CLAIR : jamais
+# rien de personnel dans « À tester ».
+name: Testeurs externes
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "etat, preparer, soumettre ou inviter"
+        type: choice
+        options: [etat, preparer, soumettre, inviter]
+        default: etat
+      fabrication:
+        description: "soumettre : le numéro de la fabrication (celui de l'exécution de « TestFlight »)"
+        type: string
+        default: ""
+      a_tester:
+        description: "soumettre : le texte « À tester » (vide : le texte par défaut ; s'affiche dans le journal public)"
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      action:
+        type: string
+        required: true
+      fabrication:
+        type: string
+        default: ""
+      a_tester:
+        type: string
+        default: ""
+    secrets:
+      ASC_CLE_P8_B64:
+        required: true
+      ASC_CLE_ID:
+        required: true
+      ASC_EMETTEUR_ID:
+        required: true
+      ASC_CONTACT_REVUE:
+        required: false
+      ASC_TESTEURS:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  testeurs:
+    name: Testeurs externes (${{ inputs.action }})
+    runs-on: ubuntu-24.04
+    # le traitement d'une fabrication neuve par Apple : 5 à 30 min (« soumettre » attend 45 min au plus)
+    timeout-minutes: 60
+    concurrency:
+      group: testeurs-externes
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Masques (contact et testeurs, champ par champ)
+        env:
+          ASC_CONTACT_REVUE: ${{ secrets.ASC_CONTACT_REVUE }}
+          ASC_TESTEURS: ${{ secrets.ASC_TESTEURS }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          valeurs = set()
+          for nom in ("ASC_CONTACT_REVUE", "ASC_TESTEURS"):
+              brut = os.environ.get(nom, "").strip()
+              if not brut:
+                  continue
+              donnees = json.loads(brut)
+              for v in (donnees.values() if isinstance(donnees, dict) else [x for t in donnees for x in t.values()]):
+                  if isinstance(v, str) and v.strip():
+                      valeurs.add(v.strip())
+                      if "@" in v:
+                          valeurs.add(v.split("@", 1)[0])
+          for v in valeurs:
+              print(f"::add-mask::{v}")
+          print(f"{len(valeurs)} valeur(s) masquée(s)")
+          EOF
+      - name: Clé d'API App Store Connect
+        env:
+          ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+        run: scripts/cle-asc.sh
+      - name: App Store Connect
+        env:
+          ACTION: ${{ inputs.action }}
+          FABRICATION: ${{ inputs.fabrication }}
+          ALFRED_A_TESTER: ${{ inputs.a_tester }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+          ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+          ASC_CONTACT_REVUE: ${{ secrets.ASC_CONTACT_REVUE }}
+          ASC_TESTEURS: ${{ secrets.ASC_TESTEURS }}
+        run: |
+          export ASC_CLE="$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
+          outil=scripts/outils/testflight_externe.py
+          case "$ACTION" in
+            etat|preparer|inviter) python3 "$outil" "$ACTION" ;;
+            soumettre)
+              [[ "$FABRICATION" =~ ^[0-9]+$ ]] || { echo "::error::numéro de fabrication attendu"; exit 1; }
+              python3 "$outil" soumettre "$FABRICATION" ;;
+            *) echo "::error::action inconnue"; exit 1 ;;
+          esac
+          python3 "$outil" etat
+      - name: Effacer la clé
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

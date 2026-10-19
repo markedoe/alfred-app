@@ -4,6 +4,8 @@
 # que la clé. Signature automatique : l'archive est signée par le certificat de développement unique de la CI (secrets
 # du dépôt, trousseau temporaire ; sans lui, chaque machine neuve en créerait un), la distribution par Apple (« cloud ») ;
 # les profils sont gérés par Xcode. « envoyer » décoché : archive et export signés, sans envoi (vérifier la signature).
+# « externe » (coché par défaut, et toujours sur une étiquette) : une fois envoyée, la fabrication part aussi au groupe
+# des testeurs externes, après l'examen d'Apple (workflow « Testeurs externes », action « soumettre »).
 name: TestFlight
 
 on:
@@ -11,6 +13,10 @@ on:
     inputs:
       envoyer:
         description: "Envoyer à TestFlight (décoché : archive et export signés seulement)"
+        type: boolean
+        default: true
+      externe:
+        description: "Aussi aux testeurs externes : groupe externe et examen d'Apple (workflow « Testeurs externes »)"
         type: boolean
         default: true
   push:
@@ -107,3 +113,18 @@ jobs:
         run: |
           rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/signature.p12"
           if [[ -f "$RUNNER_TEMP/signature.keychain-db" ]]; then security delete-keychain "$RUNNER_TEMP/signature.keychain-db"; fi
+
+  externe:
+    name: Testeurs externes
+    needs: testflight
+    # sur une étiquette, « inputs » est vide : l'envoi aux testeurs externes a lieu
+    if: github.event_name != 'workflow_dispatch' || (inputs.envoyer && inputs.externe)
+    uses: ./.github/workflows/testeurs-externes.yml
+    with:
+      action: soumettre
+      fabrication: "${{ github.run_number }}"
+    secrets:
+      ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+      ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+      ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+      ASC_CONTACT_REVUE: ${{ secrets.ASC_CONTACT_REVUE }}

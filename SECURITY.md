@@ -31,8 +31,9 @@ dépasser ce que le relais permet.
 - **Actions :** épinglées par empreinte de commit, avec des permissions minimales.
 - **Outils téléchargés :** vérifiés par leur SHA-256.
 - **Image Swift :** épinglée par empreinte.
-- **Contrôles :** gitleaks à chaque envoi ; CodeQL (Swift et workflows).
-- **Secrets :** seuls les workflows `TestFlight` (lancement manuel ou étiquette) et `Certificats` (lancement manuel,
+- **Contrôles :** gitleaks à chaque envoi ; CodeQL (Swift, workflows et outils Python).
+- **Secrets :** seuls les workflows `TestFlight` (lancement manuel ou étiquette), `Testeurs externes` (clé d’API,
+  contact de l’examen d’Apple et testeurs, masqués champ par champ dans le journal) et `Certificats` (lancement manuel,
   clé d’API seule) les lisent. Ils ne sont jamais transmis à une contribution extérieure.
 - **Signature :** automatique. L’archive est signée par un certificat de développement unique, gardé dans les secrets
   du dépôt et installé dans un trousseau temporaire, effacé en fin de fabrication. La distribution est signée par Apple
