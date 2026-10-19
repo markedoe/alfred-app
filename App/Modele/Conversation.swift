@@ -10,7 +10,12 @@ import Observation
 /// - **demi-duplex** : pendant la réflexion et la voix d'Alfred, le micro n'envoie rien ; 1 s de marge après sa voix
 ///   (la fin de sa phrase ne doit pas ouvrir un tour) ;
 /// - **rien de compris** : on réécoute, sans drame ;
-/// - **échec** (délai, refus, coupure) : affiché, jamais renvoyé ; la conversation se ferme.
+/// - **échec** (délai, refus, coupure) : affiché, jamais renvoyé ; la conversation se ferme ;
+/// - **un fil par conversation** : chaque conversation part d'un fil neuf, et une question écrite hors conversation
+///   aussi (décision du 06.10 : les liens entre demandes ne valent que dans la même session ; la console :
+///   `session.convId`) ;
+/// - **pendant une réponse** (la console : `voiceAction`, `talk`) : toucher le noyau fait taire Alfred ; une question
+///   écrite le fait taire et part, une fois son tour fini ; pendant la réflexion, rien ne part (le texte reste).
 @Observable @MainActor
 final class Conversation {
     enum Phase: Hashable, Sendable {
@@ -88,17 +93,20 @@ final class Conversation {
     @ObservationIgnored var client: ClientRelais?
 
     private let reglages: UserDefaults
-    @ObservationIgnored private var conversationId: String?
+    /// Le fil de HA de la conversation en cours (nil : un fil neuf au prochain tour).
+    @ObservationIgnored private(set) var conversationId: String?
     @ObservationIgnored private var ecoute: Task<Void, Never>?
     @ObservationIgnored private var minuterieSilence: Task<Void, Never>?
     @ObservationIgnored private var lecture: Task<Void, Never>?
     @ObservationIgnored private var detecteur = DetecteurParole(conversation: true)
     @ObservationIgnored private var amorce = Amorce()
-    @ObservationIgnored private var tourOuvert = false
+    /// Une phrase est en cours d'envoi (observé : l'écrit attend sa fin).
+    private var tourOuvert = false
     @ObservationIgnored private var margeRestante = 0
     @ObservationIgnored private var tourVocal = false
     @ObservationIgnored private var voixEnCours = false
-    @ObservationIgnored private var finRecue = false
+    /// Le tour de la maison est fini (observé : pendant la voix d'Alfred, l'écrit attend cette fin).
+    private var finRecue = false
     @ObservationIgnored private var messageAlfred: UUID?
 
     init(voix: any MoteurVoix, reglages: UserDefaults = .standard) {
@@ -110,7 +118,7 @@ final class Conversation {
 
     private func brancher(_ v: any MoteurVoix) {
         v.surInterruption = { [weak self] in
-            Task { await self?.terminer() }
+            Task { await self?.couper() }
         }
     }
 
@@ -127,13 +135,18 @@ final class Conversation {
 
     // MARK: - parole
 
-    /// Le toucher du noyau : ouvre la conversation, ou la ferme.
+    /// Le toucher du noyau : ouvre la conversation, ou la ferme ; Alfred qui parle hors conversation se tait (la
+    /// console : `voiceAction`). Pendant la réflexion, rien.
     func basculerEcoute() async {
         if enConversation {
             await terminer()
             return
         }
-        guard essai == .arrete else { return }
+        if phase == .reponse {
+            interrompreReponse()
+            return
+        }
+        guard phase == .repos, essai == .arrete else { return }
         guard client != nil else {
             aviser("La maison n’est pas jointe pour l’instant.", .attention)
             return
@@ -151,6 +164,7 @@ final class Conversation {
         }
         signalerEntreeOubliee()
         enConversation = true
+        conversationId = nil
         detecteur = DetecteurParole(conversation: true)
         ecouterTour(marge: 0)
         ecoute = Task { [weak self] in
@@ -203,8 +217,13 @@ final class Conversation {
             case .attaque:
                 minuterieSilence?.cancel()
                 guard await client.parler(conversation: conversationId, amorce: amorce.prendre()) else {
-                    aviser("La maison n’est pas jointe pour l’instant.", .attention)
+                    await aviserRefus(client)
                     await terminer()
+                    return
+                }
+                // la conversation a pu se fermer pendant l'envoi (toucher, app cachée) : la phrase se clôt aussitôt
+                guard enConversation else {
+                    await client.finParole()
                     return
                 }
                 tourOuvert = true
@@ -219,6 +238,20 @@ final class Conversation {
                 continue
             }
         }
+    }
+
+    /// L'app cachée, un appel, Siri, la liaison coupée : le micro se ferme, l'essai s'arrête et Alfred se tait (la
+    /// console à la coupure : `endSession`, `stopTest`, `stopSpeaking`).
+    func couper() async {
+        arreterEssai()
+        await terminer()
+        interrompreReponse()
+    }
+
+    /// Alfred se tait (sa voix s'arrête) ; son tour finit normalement quand la maison le clôt.
+    private func interrompreReponse() {
+        lecture?.cancel()
+        voix.interrompre()
     }
 
     /// Ferme la conversation (toucher, silence, interruption par iOS, app en arrière-plan).
@@ -338,26 +371,49 @@ final class Conversation {
 
     // MARK: - écrit
 
-    /// Une question écrite. Ferme d'abord la conversation à la voix, s'il y en a une.
-    func ecrire(_ texte: String) async {
+    /// Une question écrite peut partir (la console : `talk`, `#send-text`) : au repos, au micro avant toute phrase, ou
+    /// pendant la voix d'Alfred une fois son tour fini (elle le fait taire) ; jamais pendant la réflexion.
+    var peutEcrire: Bool {
+        switch phase {
+        case .repos: true
+        case .ecoute: !tourOuvert
+        case .reponse: finRecue
+        case .reflexion: false
+        }
+    }
+
+    /// Une question écrite : true si elle est partie (sinon, le texte reste à qui l'a écrit). Dans une conversation,
+    /// elle en garde le fil et la ferme ; hors conversation, elle part d'un fil neuf.
+    @discardableResult
+    func ecrire(_ texte: String) async -> Bool {
         let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, phase == .repos || phase == .ecoute else { return }
-        if enConversation { await terminer() }
+        guard !t.isEmpty, peutEcrire else { return false }
+        let fil = enConversation ? conversationId : nil
+        if enConversation { await terminer() } else if phase == .reponse { interrompreReponse() }
         guard let client else {
             aviser("La maison n’est pas jointe pour l’instant.", .attention)
-            return
+            return false
         }
-        let message = Message(id: UUID(), auteur: .moi, texte: t, date: .now)
-        guard await client.ecrire(t, conversation: conversationId) else {
-            messages.append(message)
-            aviser("La maison n’est pas jointe pour l’instant.", .attention)
-            return
+        guard await client.ecrire(t, conversation: fil) else {
+            await aviserRefus(client)
+            return false
         }
-        messages.append(message)
+        messages.append(Message(id: UUID(), auteur: .moi, texte: t, date: .now))
+        conversationId = fil
         tourVocal = false
         finRecue = false
         phase = .reflexion
         commencerReponse()
+        return true
+    }
+
+    /// Un tour refusé par le client : la maison injoignable, ou une demande encore en cours.
+    private func aviserRefus(_ client: ClientRelais) async {
+        if case .pret = await client.etat {
+            aviser("Alfred termine la demande précédente. Réessayez dans un instant.", .info)
+        } else {
+            aviser("La maison n’est pas jointe pour l’instant.", .attention)
+        }
     }
 
     /// Nouvelle conversation : Alfred oublie le fil (la session de parole de HA).

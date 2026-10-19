@@ -93,7 +93,9 @@ struct PageConnexion: UIViewRepresentable {
         }
 
         private func terminer(_ vue: WKWebView) async {
+            // posé AVANT l'attente : une 2e navigation vers /moi pendant la lecture des cookies ne termine pas deux fois
             guard !termine else { return }
+            termine = true
             let cookies = await withCheckedContinuation { (suite: CheckedContinuation<[HTTPCookie], Never>) in
                 vue.configuration.websiteDataStore.httpCookieStore.getAllCookies { suite.resume(returning: $0) }
             }
@@ -103,10 +105,10 @@ struct PageConnexion: UIViewRepresentable {
                     $0.name == SessionRelais.nomCookie && $0.domain.caseInsensitiveCompare(hote) == .orderedSame
                 })
             else {
+                termine = false
                 echec("La maison n’a pas confirmé la connexion. Réessayez.")
                 return
             }
-            termine = true
             reussite(SessionRelais(valeur: cookie.value))
         }
 

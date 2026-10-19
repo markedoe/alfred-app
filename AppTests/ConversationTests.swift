@@ -138,6 +138,100 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    /// Une conversation hors maison, avec ses propres réglages (lecture des réponses écrites activée).
+    static func seule(_ voix: VoixMuette) -> Conversation {
+        let reglages = UserDefaults(suiteName: "tests.reponse")!
+        reglages.removePersistentDomain(forName: "tests.reponse")
+        let c = Conversation(voix: voix, reglages: reglages)
+        c.lireReponsesEcrites = true
+        return c
+    }
+
+    @Test("Noyau pendant une réponse : rien pendant la réflexion ; Alfred qui parle se tait, le micro reste fermé")
+    func noyauPendantUneReponse() async throws {
+        let voix = VoixMuette()
+        voix.lectureTenue = true
+        let c = Self.seule(voix)
+        c.recevoir(.reflechit)
+        await c.basculerEcoute()
+        #expect(!c.enConversation && c.phase == .reflexion)
+        c.recevoir(.voix(chemin: "/tts/exemple.mp3"))
+        try await Self.attendre(c) { _ in voix.lues.count == 1 }
+        #expect(c.phase == .reponse)
+        await c.basculerEcoute()
+        #expect(!c.enConversation && voix.interruptions == 1)
+        c.recevoir(.termine(conversationId: "fil", continuer: false))
+        try await Self.attendre(c) { $0.phase == .repos }
+    }
+
+    @Test("Écrit pendant une réponse : refusé pendant la réflexion (rien ne se perd) ; pendant la voix, Alfred se tait")
+    func ecritPendantUneReponse() async throws {
+        let (c, client, voix) = try await Self.pret()
+        voix.lectureTenue = true
+        c.lireReponsesEcrites = true
+        c.recevoir(.reflechit)
+        #expect(!c.peutEcrire)
+        #expect(await c.ecrire("Quelle heure est-il ?") == false)
+        #expect(c.messages.count == 1)
+        c.recevoir(.voix(chemin: "/tts/exemple.mp3"))
+        try await Self.attendre(c) { _ in voix.lues.count == 1 }
+        #expect(!c.peutEcrire, "le tour de la maison n'est pas fini")
+        c.recevoir(.termine(conversationId: "demo", continuer: false))
+        #expect(c.peutEcrire)
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        #expect(voix.interruptions >= 1)
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 3 }
+        #expect(c.messages[1].auteur == .moi && c.messages[2].texte.hasPrefix("Il est "))
+        await client.arreter()
+    }
+
+    @Test("Un fil neuf à chaque conversation, et pour une question écrite hors conversation")
+    func filNeuf() async throws {
+        let (c, client, _) = try await Self.pret()
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 2 }
+        #expect(c.conversationId == "demo", "le fil rendu par la maison")
+        await c.basculerEcoute()
+        #expect(c.enConversation && c.conversationId == nil)
+        await c.terminer()
+        #expect(await c.ecrire("Allume la cuisine"))
+        #expect(c.conversationId == nil, "hors conversation : la question part sans fil")
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 4 }
+        await client.arreter()
+    }
+
+    @Test("À la voix : une phrase ouvre un tour ; rien saisi, Alfred réécoute ; couper ferme tout")
+    func cycleALaVoix() async throws {
+        let (c, client, voix) = try await Self.pret()
+        await c.basculerEcoute()
+        #expect(c.enConversation && c.phase == .ecoute)
+        // 100 ms de quasi-silence (le plancher de bruit descend), puis 400 ms de voix : une attaque
+        voix.entendre([Float](repeating: 0.001, count: 1600))
+        for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        // la démo n'a pas de transcription : « rien saisi », et la conversation réécoute
+        try await Self.attendre(c) { $0.avis?.texte == "Je n’ai rien saisi." }
+        #expect(c.enConversation && c.phase == .ecoute)
+        await c.couper()
+        #expect(!c.enConversation)
+        // une 2e phrase a pu partir avec la fin de la voix : elle se clôt, puis le repos
+        try await Self.attendre(c) { $0.phase == .repos }
+        await client.arreter()
+    }
+
+    @Test("Couper (appel, app cachée) : l'essai du micro s'arrête et Alfred se tait")
+    func couper() async throws {
+        let voix = VoixMuette()
+        voix.lectureTenue = true
+        let c = Self.seule(voix)
+        c.recevoir(.reflechit)
+        c.recevoir(.voix(chemin: "/tts/exemple.mp3"))
+        try await Self.attendre(c) { _ in voix.lues.count == 1 }
+        await c.couper()
+        #expect(voix.interruptions == 1)
+        c.recevoir(.termine(conversationId: nil, continuer: false))
+        try await Self.attendre(c) { $0.phase == .repos }
+    }
+
     @Test("Nouvelle conversation : le fil est oublié")
     func nouvelle() async throws {
         let (c, client, _) = try await Self.pret()

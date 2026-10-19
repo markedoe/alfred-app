@@ -21,6 +21,9 @@ final class Annexes {
     private(set) var accesDocuments = AccesDocuments.ouvert
     /// « Envoi de devis.pdf… », « Reçu. Alfred le lit… » (la ligne d'état de la console, sous le dépôt).
     private(set) var etatDepot: String?
+    /// Le dernier échec d'un dépôt ou d'une suppression, écrit dans la fenêtre Documents elle-même (un avis de la
+    /// console resterait caché sous la fenêtre ouverte).
+    private(set) var erreurDepot: String?
     private(set) var envoiEnCours = false
     private(set) var notifications: [NotificationConsole] = []
     private(set) var nonLues = 0
@@ -33,7 +36,10 @@ final class Annexes {
     @ObservationIgnored private let aviser: @MainActor (String, Conversation.Avis.Genre) -> Void
     @ObservationIgnored private var taches: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var connecte = false
+    /// Les relectures tournent.
     @ObservationIgnored private var actif = false
+    /// L'app est cachée : rien ne repart avant `reprendre()`, même une reconnexion.
+    @ObservationIgnored private var cachee = false
 
     init(acces: any AccesRelais, aviser: @escaping @MainActor (String, Conversation.Avis.Genre) -> Void) {
         self.acces = acces
@@ -45,24 +51,29 @@ final class Annexes {
     /// La personne est connectée (`/moi`) : notifications et liens ; l'état et les documents tournent dans tous les cas.
     func demarrer(connecte: Bool) {
         self.connecte = connecte
-        actif = true
+        guard !cachee else { return }
         relancerTout()
     }
 
     func reprendre() {
+        cachee = false
         guard !actif else { return }
-        actif = true
         relancerTout()
     }
 
     func suspendre() {
+        cachee = true
+        arreterBoucles()
+    }
+
+    private func arreterBoucles() {
         actif = false
         for t in taches.values { t.cancel() }
         taches = [:]
     }
 
     private func relancerTout() {
-        suspendre()
+        arreterBoucles()
         actif = true
         boucle("etat") { [weak self] in await self?.chargerEtat() ?? .seconds(30) }
         boucle("documents") { [weak self] in await self?.chargerDocuments() ?? .seconds(60) }
@@ -89,11 +100,12 @@ final class Annexes {
 
     /// Relire les documents tout de suite (après un dépôt, une suppression, à l'ouverture de la fenêtre).
     func relireDocuments() {
+        guard actif else { return }
         boucle("documents") { [weak self] in await self?.chargerDocuments() ?? .seconds(60) }
     }
 
     func relireNotifications() {
-        guard connecte else { return }
+        guard actif, connecte else { return }
         boucle("notifications") { [weak self] in await self?.chargerNotifications() ?? .seconds(15) }
     }
 
@@ -167,10 +179,11 @@ final class Annexes {
     func deposer(_ depot: DepotDocument) async {
         guard !envoiEnCours else { return }
         guard depot.fichier.count <= DepotDocument.tailleMax else {
-            aviser("Document trop lourd : 20 Mo au plus.", .attention)
+            signaler("Document trop lourd : 20 Mo au plus.")
             return
         }
         envoiEnCours = true
+        erreurDepot = nil
         etatDepot = "Envoi de \(depot.nomFichier)…"
         defer { envoiEnCours = false }
         do {
@@ -186,9 +199,15 @@ final class Annexes {
             }
         } catch {
             etatDepot = nil
-            aviser("Envoi impossible : " + Self.motif(error), .attention)
+            signaler("Envoi impossible : " + Self.motif(error))
         }
         relireDocuments()
+    }
+
+    /// Un échec de dépôt (fichier illisible, trop lourd, envoi refusé) : dans la fenêtre Documents, et en avis.
+    func signaler(_ message: String) {
+        erreurDepot = message
+        aviser(message, .attention)
     }
 
     func supprimer(_ document: DocumentMaison) async {
@@ -197,9 +216,10 @@ final class Annexes {
         do {
             let (statut, _) = try await acces.envoyer(RequeteRelais(.delete, chemin))
             guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }
+            erreurDepot = nil
             aviser("Document supprimé.", .info)
         } catch {
-            aviser("Suppression impossible : " + Self.motif(error), .attention)
+            signaler("Suppression impossible : " + Self.motif(error))
         }
         relireDocuments()
     }

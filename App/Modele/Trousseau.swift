@@ -25,17 +25,22 @@ enum Trousseau {
         return String(data: donnees, encoding: .utf8)
     }
 
+    /// Remplace la session (mise à jour, sinon ajout) : un échec laisse l'ancienne en place, jamais aucune.
     static func ecrire(_ valeur: String, compte: String) throws {
-        effacer(compte: compte)
         let element: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: compte,
+        ]
+        let attributs: [CFString: Any] = [
             kSecValueData: Data(valeur.utf8),
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecAttrSynchronizable: false,
         ]
-        let statut = SecItemAdd(element as CFDictionary, nil)
+        var statut = SecItemUpdate(element as CFDictionary, attributs as CFDictionary)
+        if statut == errSecItemNotFound {
+            let nouveau = element.merging(attributs) { $1 }.merging([kSecAttrSynchronizable: false]) { $1 }
+            statut = SecItemAdd(nouveau as CFDictionary, nil)
+        }
         guard statut == errSecSuccess else { throw Erreur(statut: statut) }
     }
 

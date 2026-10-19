@@ -121,7 +121,14 @@ final class VoixSysteme: MoteurVoix {
             try? session.setPreferredInput(nil)
         }
         try session.setActive(true)
-        let flux = try capture.demarrer()
+        let flux: AsyncStream<[Float]>
+        do {
+            flux = try capture.demarrer()
+        } catch {
+            // la session non mixable a coupé la musique : elle lui est rendue
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            throw error
+        }
         lecteurConversation = LecteurVoix(moteur: capture.moteur, possedeMoteur: false)
         micOuvert = true
         return flux
@@ -213,8 +220,22 @@ final class VoixMuette: MoteurVoix {
     /// Pour les tests : fait « entendre » des échantillons.
     func entendre(_ echantillons: [Float]) { continuation?.yield(echantillons) }
 
-    func lire(_ chemin: String) async { lues.append(chemin) }
-    func interrompre() {}
+    /// Pour les tests : chaque lecture dure jusqu'à `interrompre()` (Alfred « en train de parler »).
+    var lectureTenue = false
+    private(set) var interruptions = 0
+    private var tenue: CheckedContinuation<Void, Never>?
+
+    func lire(_ chemin: String) async {
+        lues.append(chemin)
+        guard lectureTenue else { return }
+        await withCheckedContinuation { tenue = $0 }
+    }
+
+    func interrompre() {
+        interruptions += 1
+        tenue?.resume()
+        tenue = nil
+    }
     func accueillir() { accueils += 1 }
     var niveauVoix: Float { 0 }
 }

@@ -25,8 +25,9 @@ final class CaptureMicro: @unchecked Sendable {
     func demarrer() throws -> AsyncStream<[Float]> {
         arreter()
         let entree = moteur.inputNode
-        // la voix d'Alfred passe par CE moteur : elle n'est pas baissée ; les autres sons (musique) le sont pendant la
-        // conversation (réglage par défaut du traitement de la voix), ce qui aide à comprendre
+        // la voix d'Alfred passe par CE moteur : le traitement de la voix la connaît et l'ôte du micro. La musique d'une
+        // autre app est mise en pause pendant la conversation (session « enregistrement », non mixable) et reprend à
+        // sa fin (`notifyOthersOnDeactivation`), comme avec Siri
         if !entree.isVoiceProcessingEnabled { try entree.setVoiceProcessingEnabled(true) }
         let formatMicro = entree.outputFormat(forBus: 0)
         guard formatMicro.sampleRate > 0, formatMicro.channelCount > 0,

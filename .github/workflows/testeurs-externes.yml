@@ -111,7 +111,7 @@ jobs:
               python3 "$outil" soumettre "$FABRICATION" ;;
             *) echo "::error::action inconnue"; exit 1 ;;
           esac
-          python3 "$outil" etat
+          if [[ "$ACTION" != etat ]]; then python3 "$outil" etat; fi
       - name: Effacer la clé
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
