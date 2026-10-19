@@ -142,45 +142,46 @@ actor MaisonDemo {
         let humidite: String?
     }
 
+    // une maison inventée (19.10 : rien qui décrive une vraie maison) : trois niveaux, des pièces de partout
     static let pieces: [Piece] = [
         Piece(
-            id: "cinema", nom: "CINÉMA", mot: "cinema", etage: "ss", allumee: false, temperature: "19.2", humidite: "58"
+            id: "garage", nom: "GARAGE", mot: "garage", etage: "ss", allumee: false, temperature: "14.8", humidite: "62"
         ),
+        Piece(
+            id: "fitness", nom: "FITNESS", mot: "fitness", etage: "ss", allumee: false, temperature: "18.9",
+            humidite: nil),
         Piece(
             id: "salon", nom: "SALON", mot: "salon", etage: "rdc", allumee: true, temperature: "21.4", humidite: "52"),
         Piece(
             id: "cuisine", nom: "CUISINE", mot: "cuisine", etage: "rdc", allumee: true, temperature: "22.1",
             humidite: nil),
         Piece(
-            id: "manger", nom: "S. À MANGER", mot: "salle a manger", etage: "rdc", allumee: false, temperature: "21",
-            humidite: nil),
+            id: "veranda", nom: "VÉRANDA", mot: "veranda", etage: "rdc", allumee: false, temperature: "18.6",
+            humidite: "55"),
         Piece(
-            id: "entree", nom: "ENTRÉE", mot: "entree", etage: "rdc", allumee: false, temperature: nil, humidite: nil),
-        Piece(
-            id: "terrasse", nom: "TERRASSE", mot: "terrasse", etage: "rdc", allumee: false, temperature: nil,
-            humidite: nil),
-        Piece(
-            id: "bureau", nom: "BUREAU", mot: "bureau", etage: "1er", allumee: true, temperature: "20.9", humidite: "48"
+            id: "atelier", nom: "ATELIER", mot: "atelier", etage: "rdc", allumee: false, temperature: nil, humidite: nil
         ),
         Piece(
-            id: "chambre", nom: "CHAMBRE", mot: "chambre", etage: "1er", allumee: false, temperature: "19.5",
-            humidite: "50"),
+            id: "bibliotheque", nom: "BIBLIOTHÈQUE", mot: "bibliotheque", etage: "rdc", allumee: false,
+            temperature: "20.7", humidite: nil),
         Piece(
-            id: "sdb1", nom: "SDB 1ER", mot: "salle de bain", etage: "1er", allumee: false, temperature: "22.6",
+            id: "jardin", nom: "JARDIN", mot: "jardin", etage: "rdc", allumee: false, temperature: nil, humidite: nil),
+        Piece(
+            id: "mezzanine", nom: "MEZZANINE", mot: "mezzanine", etage: "1er", allumee: true, temperature: "20.9",
+            humidite: "48"),
+        Piece(
+            id: "suite", nom: "SUITE", mot: "suite", etage: "1er", allumee: false, temperature: "19.5", humidite: "50"),
+        Piece(
+            id: "bleue", nom: "CH. BLEUE", mot: "chambre bleue", etage: "1er", allumee: false, temperature: "19.8",
+            humidite: "49"),
+        Piece(
+            id: "eau", nom: "SALLE D’EAU", mot: "salle d'eau", etage: "1er", allumee: false, temperature: "22.6",
             humidite: "64"),
         Piece(
-            id: "escalier", nom: "ESCALIER", mot: "escalier", etage: "1-2", allumee: false, temperature: nil,
-            humidite: nil),
-        Piece(id: "jeux", nom: "JEUX", mot: "jeux", etage: "2e", allumee: false, temperature: "20.3", humidite: "47"),
+            id: "studio", nom: "STUDIO", mot: "studio", etage: "1er", allumee: false, temperature: "20.3",
+            humidite: "47"),
         Piece(
-            id: "amis", nom: "CH. AMIS", mot: "chambre d'amis", etage: "2e", allumee: false, temperature: nil,
-            humidite: nil),
-        Piece(
-            id: "sdb2", nom: "SDB 2E", mot: "salle de bain du 2e", etage: "2e", allumee: false, temperature: "21.8",
-            humidite: "61"),
-        Piece(
-            id: "couloir", nom: "COULOIR 2E", mot: "couloir", etage: "2e", allumee: false, temperature: nil,
-            humidite: nil),
+            id: "palier", nom: "PALIER", mot: "palier", etage: "1er", allumee: false, temperature: nil, humidite: nil),
     ]
 
     static let console: ValeurJSON = [
@@ -197,10 +198,10 @@ actor MaisonDemo {
             }),
         "autres": [
             [
-                "nom": "BUANDERIE", "etage": "ss", "temperature": "sensor.demo_buanderie_t",
-                "humidite": "sensor.demo_buanderie_h",
+                "nom": "CELLIER", "etage": "ss", "temperature": "sensor.demo_cellier_t",
+                "humidite": "sensor.demo_cellier_h",
             ],
-            ["nom": "CAVE", "etage": "ss", "temperature": "sensor.demo_cave_t", "humidite": "sensor.demo_cave_h"],
+            ["nom": "SERRE", "etage": "rdc", "temperature": "sensor.demo_serre_t", "humidite": "sensor.demo_serre_h"],
         ],
         "jauges": [
             ["entite": "sensor.demo_gpu", "libelle": "gpu", "unite": "°", "max": 100],
@@ -238,10 +239,10 @@ actor MaisonDemo {
             if let h = p.humidite { capteur("sensor.demo_\(p.id)_h", h, "%") }
         }
         capteur("sensor.demo_salon_cov", "182", "µg/m³")
-        capteur("sensor.demo_buanderie_t", "20.5", "°C")
-        capteur("sensor.demo_buanderie_h", "59", "%")
-        capteur("sensor.demo_cave_t", "17.8", "°C")
-        capteur("sensor.demo_cave_h", "66", "%")
+        capteur("sensor.demo_cellier_t", "16.4", "°C")
+        capteur("sensor.demo_cellier_h", "63", "%")
+        capteur("sensor.demo_serre_t", "24.2", "°C")
+        capteur("sensor.demo_serre_h", "71", "%")
         capteur("sensor.demo_gpu", "41", "°C")
         capteur("sensor.demo_pc", "86", "W")
         capteur("sensor.demo_maison", "640", "W")

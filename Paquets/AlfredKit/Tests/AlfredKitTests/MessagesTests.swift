@@ -84,7 +84,7 @@ struct MessagesTests {
 
     @Test("Demandes lentes (clip d'accueil tout de suite)")
     func lentes() {
-        #expect(DemandeLente.estLente("Cherche la météo à Lausanne"))
+        #expect(DemandeLente.estLente("Cherche la météo de demain"))
         #expect(DemandeLente.estLente("Alfred, recette de la fondue"))
         #expect(DemandeLente.estLente("ok demande à Claude pourquoi le ciel est bleu"))
         #expect(DemandeLente.estLente("Actualités"))

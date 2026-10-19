@@ -21,6 +21,9 @@ struct ConsoleVue: View {
     @AppStorage("console.environnementMasque") private var environnementMasque = false
     /// Le démarrage de la console (2,4 s), joué une fois par ouverture.
     @State private var debut = Date.now
+    /// La hauteur de la console sans le clavier : la saisie ouverte, le clavier réduit la place, et les jauges ne
+    /// doivent ni disparaître ni faire sauter la roue (revue du 18.10).
+    @State private var hauteurSansClavier: CGFloat = 0
 
     enum VueConsole: Hashable, CaseIterable {
         case alfred, pieces, environnement
@@ -39,6 +42,7 @@ struct ConsoleVue: View {
             let large = geo.size.width > 1100
             ZStack(alignment: .bottom) {
                 Console.fond
+                echapConversation
                 VStack(spacing: 0) {
                     EnTeteConsole(largeur: geo.size.width, fenetre: $fenetre, liensOuverts: $liensOuverts)
                         .zIndex(1)
@@ -51,7 +55,8 @@ struct ConsoleVue: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     BasConsole(
-                        large: large, jauges: geo.size.height >= 640 || large, ecrire: $ecrire,
+                        large: large, jauges: (ecrire ? hauteurSansClavier : geo.size.height) >= 640 || large,
+                        ecrire: $ecrire,
                         raccourcis: fenetre == nil && !liensOuverts)
                     if !large {
                         NavConsole(vue: $vue)
@@ -97,6 +102,9 @@ struct ConsoleVue: View {
                 // la console reste devinée sous le voile de la fenêtre
                 .presentationBackground(.clear)
             }
+            .onChange(of: geo.size.height, initial: true) { _, h in
+                if !ecrire { hauteurSansClavier = h }
+            }
             .onChange(of: fenetre) { _, f in
                 if f != nil {
                     liensOuverts = false
@@ -118,6 +126,21 @@ struct ConsoleVue: View {
         }
     }
 
+    /// Échap revient à la pièce (ni liste des liens, ni saisie, ni fenêtre au-dessus) ; la console, dans l'ordre :
+    /// la liste des liens, la saisie, la pièce, puis la conversation (`keydown`).
+    private var echapLibre: Bool { !liensOuverts && !ecrire && fenetre == nil }
+
+    /// Échap ferme la conversation quand rien d'autre n'est ouvert (un bouton sans surface : seul son raccourci compte).
+    @ViewBuilder private var echapConversation: some View {
+        if echapLibre, choisi == nil, conversation.enConversation {
+            Button("Terminer la conversation") { Task { await conversation.terminer() } }
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+    }
+
     /// Une fenêtre se ferme d'un coup, comme elle s'est ouverte.
     private func fermerFenetre() {
         var t = Transaction()
@@ -130,7 +153,7 @@ struct ConsoleVue: View {
     @ViewBuilder private var dispositionCompacte: some View {
         switch vue {
         case .pieces:
-            VuePieces(choisi: $choisi, compact: true, debut: debut)
+            VuePieces(choisi: $choisi, compact: true, debut: debut, echap: echapLibre)
         case .alfred:
             PanneauAlfred()
                 .padding(12)
@@ -151,7 +174,7 @@ struct ConsoleVue: View {
                     .frame(width: (etroit ? 270 : 310))
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            VuePieces(choisi: $choisi, compact: false, debut: debut)
+            VuePieces(choisi: $choisi, compact: false, debut: debut, echap: echapLibre)
                 .overlay(alignment: .leading) {
                     PoigneePanneau(cote: .assistant, masque: $assistantMasque)
                 }
@@ -180,6 +203,8 @@ struct VuePieces: View {
     @Binding var choisi: String?
     let compact: Bool
     let debut: Date
+    /// Échap ferme la pièce (rien d'autre n'est ouvert au-dessus).
+    var echap = false
 
     var body: some View {
         GeometryReader { geo in
@@ -195,7 +220,7 @@ struct VuePieces: View {
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 if let s = alfred.secteurs.first(where: { $0.id == choisi }) {
                     // la console : sur toute la largeur de la roue, 16 pt des bords en disposition large
-                    CartePiece(secteur: s, large: !compact) { choisi = nil }
+                    CartePiece(secteur: s, large: !compact, echap: echap) { choisi = nil }
                         .padding(.horizontal, compact ? 12 : 16)
                         .padding(.bottom, compact ? 8 : 16)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -335,6 +360,10 @@ struct BasConsole: View {
                 .disabled(!peutParler)
                 .keyboardShortcut(raccourcis && !ecrire ? KeyboardShortcut(.space, modifiers: []) : nil)
                 .accessibilityLabel(conversation.enConversation ? "Terminer la conversation" : libelleParler)
+                // VoiceOver se tait quand le micro s'ouvre (sinon le micro l'entend)
+                .accessibilityAddTraits(
+                    !conversation.enConversation && conversation.phase == .repos ? .startsMediaSession : []
+                )
                 .accessibilityIdentifier("parler")
                 Button("Écrire") { ecrire.toggle() }
                     .buttonStyle(StyleConsole())
@@ -366,6 +395,7 @@ struct BasConsole: View {
         if conversation.enConversation { return "Terminer" }
         switch conversation.phase {
         case .reflexion: return "Analyse en cours…"
+        case .reponse: return "Interrompre"
         default: return "Parler à Alfred"
         }
     }
@@ -518,7 +548,9 @@ private struct Consommation: View {
 
 // MARK: - écrire
 
-/// La saisie de la console : un champ, « Envoyer », et la croix pour fermer.
+/// La saisie de la console (`#entry`) : un champ d'une ligne (4000 caractères, la touche « envoyer » du clavier
+/// envoie), « Envoyer », et la croix pour fermer (Échap). Le texte ne quitte le champ qu'une fois parti : pendant la
+/// réflexion d'Alfred, l'envoi attend (la console : `talk` rend false et le texte reste).
 struct SaisieConsole: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
@@ -529,13 +561,15 @@ struct SaisieConsole: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField("Écrire à Alfred…", text: $texte, axis: .vertical)
-                .lineLimit(1...4)
+            TextField("Écrire à Alfred…", text: $texte)
                 .font(.callout)
                 .foregroundStyle(Color(.texte))
                 .focused($focus)
                 .submitLabel(.send)
                 .onSubmit(envoyer)
+                .onChange(of: texte) { _, t in
+                    if t.count > Self.longueurMax { texte = String(t.prefix(Self.longueurMax)) }
+                }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
@@ -546,7 +580,10 @@ struct SaisieConsole: View {
             Button("Envoyer", action: envoyer)
                 .buttonStyle(StyleConsole(genre: .principal, hauteur: 44))
                 .fixedSize()
-                .disabled(texte.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !alfred.estPret)
+                .disabled(
+                    texte.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !alfred.estPret
+                        || !conversation.peutEcrire
+                )
                 .accessibilityIdentifier("envoyer")
             Button {
                 ouverte = false
@@ -554,6 +591,7 @@ struct SaisieConsole: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(StyleIcone())
+            .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Fermer la saisie")
         }
         .padding(10)
@@ -565,13 +603,18 @@ struct SaisieConsole: View {
         .onAppear { focus = true }
     }
 
+    /// La console : `maxlength="4000"`.
+    static let longueurMax = 4000
+
     private func envoyer() {
         let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, alfred.estPret else { return }
-        texte = ""
-        Task { await conversation.ecrire(t) }
-        ouverte = false
-        envoye()
+        guard !t.isEmpty, alfred.estPret, conversation.peutEcrire else { return }
+        Task {
+            guard await conversation.ecrire(t) else { return }
+            texte = ""
+            ouverte = false
+            envoye()
+        }
     }
 }
 
@@ -583,6 +626,7 @@ struct CartePiece: View {
     @Environment(Alfred.self) private var alfred
     let secteur: Secteur
     var large = false
+    var echap = false
     let fermer: () -> Void
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduire
@@ -590,6 +634,30 @@ struct CartePiece: View {
 
     var body: some View {
         let attente = alfred.enCours(secteur.id)
+        // aux tailles d'accessibilité, la carte ne passe plus sous l'en-tête : elle défile
+        ViewThatFits(in: .vertical) {
+            contenu(attente)
+            ScrollView { contenu(attente) }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .padding(18)
+        .background {
+            RoundedRectangle(cornerRadius: 12).fill(Console.carte).shadow(color: .black.opacity(0.5), radius: 20, y: 16)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Console.bordureCarte, lineWidth: 2))
+        .onChange(of: attente, initial: true) { _, a in
+            guard a, !reduire, !immobile else {
+                pulse = false
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("cartePiece")
+    }
+
+    /// Le contenu de la carte : son nom et son état, la croix, les mesures et le bouton.
+    private func contenu(_ attente: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -612,6 +680,7 @@ struct CartePiece: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .keyboardShortcut(echap ? .cancelAction : nil)
                 .accessibilityLabel("Fermer la pièce")
             }
             if large {
@@ -627,29 +696,21 @@ struct CartePiece: View {
                 action(attente)
             }
         }
-        .padding(18)
-        .background {
-            RoundedRectangle(cornerRadius: 12).fill(Console.carte).shadow(color: .black.opacity(0.5), radius: 20, y: 16)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Console.bordureCarte, lineWidth: 2))
-        .onChange(of: attente, initial: true) { _, a in
-            guard a, !reduire, !immobile else {
-                pulse = false
-                return
-            }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { pulse = true }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("cartePiece")
     }
 
     /// Température, humidité, COV : 22 pt en chiffres fixes (20 sur téléphone), 24 pt d'écart (18).
     private var mesures: some View {
-        HStack(alignment: .top, spacing: large ? 24 : 18) {
-            mesure("Température", secteur.temperature)
-            mesure("Humidité", secteur.humidite)
-            mesure("COV", secteur.air)
+        // côte à côte comme la console ; empilées quand elles ne tiennent plus (très grand texte)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: large ? 24 : 18) { lesMesures }
+            VStack(alignment: .leading, spacing: 10) { lesMesures }
         }
+    }
+
+    @ViewBuilder private var lesMesures: some View {
+        mesure("Température", secteur.temperature)
+        mesure("Humidité", secteur.humidite)
+        mesure("COV", secteur.air)
     }
 
     /// Le bouton de la console (`#room-action`) : un bouton ordinaire, bordé du faisceau.

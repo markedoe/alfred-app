@@ -151,6 +151,7 @@ struct StyleConsole: ButtonStyle {
     var genre: Genre
     var hauteur: CGFloat
     @Environment(\.isEnabled) private var actif
+    @Environment(\.dynamicTypeSize) private var taille
 
     init(genre: Genre = .normal, hauteur: CGFloat = 46) {
         self.genre = genre
@@ -161,8 +162,9 @@ struct StyleConsole: ButtonStyle {
         configuration.label
             .font(.subheadline.weight(.bold))
             .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .minimumScaleFactor(0.85)
+            // aux tailles d'accessibilité, le libellé passe à la ligne autant qu'il faut (jamais coupé ni réduit)
+            .lineLimit(taille.isAccessibilitySize ? nil : 2)
+            .minimumScaleFactor(taille.isAccessibilitySize ? 1 : 0.85)
             .padding(.vertical, 6)
             .foregroundStyle(actif ? texte : Console.texteInactif)
             .padding(.horizontal, 16)
@@ -230,4 +232,18 @@ enum Salutation {
         guard let titre, !titre.isEmpty else { return "\(mot)." }
         return "\(mot), \(titre)."
     }
+}
+
+/// Un bouton à la largeur de son texte, comme ceux de la console ; aux tailles d'accessibilité, il prend la largeur
+/// disponible et passe à la ligne plutôt que de sortir de l'écran (les Réglages débordaient à gauche, revue du 18.10).
+struct LargeurDuTexte: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var taille
+
+    func body(content: Content) -> some View {
+        content.fixedSize(horizontal: !taille.isAccessibilitySize, vertical: true)
+    }
+}
+
+extension View {
+    func largeurDuTexte() -> some View { modifier(LargeurDuTexte()) }
 }

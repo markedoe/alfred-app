@@ -377,7 +377,8 @@ private struct Habillage: View {
     }
 }
 
-/// Le noyau, touchable : parler à Alfred, ou terminer la conversation (la cible de la console : 0,3 R).
+/// Le noyau, touchable : parler à Alfred, terminer la conversation, ou faire taire Alfred (la cible de la console :
+/// 0,3 R ; ses règles : `voiceAction`, désactivé pendant la réflexion hors conversation).
 private struct BoutonNoyau: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
@@ -389,8 +390,17 @@ private struct BoutonNoyau: View {
             Circle().fill(.clear).frame(width: rayon * 0.6, height: rayon * 0.6).contentShape(.circle)
         }
         .buttonStyle(.plain)
-        .disabled(!alfred.estPret && !conversation.enConversation)
-        .accessibilityLabel(conversation.enConversation ? "Terminer la conversation" : "Parler à Alfred")
+        .disabled(!conversation.enConversation && (!alfred.estPret || conversation.phase == .reflexion))
+        .accessibilityLabel(libelle)
+        // VoiceOver se tait quand le micro s'ouvre (sinon le micro l'entend)
+        .accessibilityAddTraits(ouvreLeMicro ? .startsMediaSession : [])
         .accessibilityIdentifier("noyau")
+    }
+
+    private var ouvreLeMicro: Bool { !conversation.enConversation && conversation.phase == .repos }
+
+    private var libelle: String {
+        if conversation.enConversation { return "Terminer la conversation" }
+        return conversation.phase == .reponse ? "Interrompre Alfred" : "Parler à Alfred"
     }
 }

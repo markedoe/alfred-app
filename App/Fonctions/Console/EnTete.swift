@@ -33,6 +33,12 @@ struct EnTeteConsole: View {
         ViewThatFits(in: .horizontal) {
             ligne(serre: false)
             ligne(serre: true)
+            // une fenêtre à peine plus large que 560 pt (iPad en écran partagé, fenêtre de Mac) où les libellés ne
+            // tiennent pas : la ligne du téléphone, en icônes (la console déborde là, de 27 px à 561 px ; mesuré)
+            if textes {
+                ligneTelephone(serre: false)
+                ligneTelephone(serre: true)
+            }
         }
         // jamais plus large que l'écran : un en-tête trop large décalerait toute la console
         .frame(maxWidth: largeur - marge - (marge - Self.debord), alignment: .leading)
@@ -151,7 +157,11 @@ struct EnTeteConsole: View {
         }
         .accessibilityIdentifier("reglages")
         if let liens = alfred.annexes?.liens, !liens.isEmpty {
-            BoutonEnTete(icone: "square.grid.2x2", libelle: "Autres systèmes", actif: liensOuverts) {
+            // Échap referme la liste ouverte (la console : `keydown`, avant tout le reste)
+            BoutonEnTete(
+                icone: "square.grid.2x2", libelle: "Autres systèmes", actif: liensOuverts,
+                raccourci: liensOuverts ? .cancelAction : nil
+            ) {
                 liensOuverts.toggle()
             }
             .accessibilityIdentifier("liens")
@@ -248,6 +258,7 @@ private struct BoutonEnTete: View {
     let icone: String
     let libelle: String
     let actif: Bool
+    var raccourci: KeyboardShortcut?
     let action: () -> Void
 
     var body: some View {
@@ -257,6 +268,7 @@ private struct BoutonEnTete: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(raccourci)
         .accessibilityLabel(libelle)
         .accessibilityShowsLargeContentViewer {
             Image(systemName: icone)

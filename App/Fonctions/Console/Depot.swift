@@ -90,7 +90,7 @@ struct Depot: View {
         guard let donnees = try? await element.loadTransferable(type: Data.self),
             let jpeg = UIImage(data: donnees)?.jpegData(compressionQuality: 0.9)
         else {
-            alfred.conversation.aviser("Cette photo n’a pas pu être lue.", .attention)
+            alfred.annexes?.signaler("Cette photo n’a pas pu être lue.")
             return
         }
         await envoyer(jpeg, nom: "Photo \(Self.horodatage()).jpg", type: "image/jpeg")
@@ -101,18 +101,18 @@ struct Depot: View {
         defer { if accede { url.stopAccessingSecurityScopedResource() } }
         // la taille d'abord : un fichier trop lourd n'est pas lu en mémoire
         if let taille = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, taille > DepotDocument.tailleMax {
-            alfred.conversation.aviser("Document trop lourd : 20 Mo au plus.", .attention)
+            alfred.annexes?.signaler("Document trop lourd : 20 Mo au plus.")
             return
         }
         guard let donnees = try? Data(contentsOf: url) else {
-            alfred.conversation.aviser("Ce fichier n’a pas pu être lu.", .attention)
+            alfred.annexes?.signaler("Ce fichier n’a pas pu être lu.")
             return
         }
         let type = UTType(filenameExtension: url.pathExtension) ?? .data
         // une image que le relais ne lit pas (HEIC, TIFF…) part en JPEG, sous le même nom
         if type.conforms(to: .image), ![UTType.jpeg, .png, .webP].contains(where: { type.conforms(to: $0) }) {
             guard let jpeg = UIImage(data: donnees)?.jpegData(compressionQuality: 0.9) else {
-                alfred.conversation.aviser("Cette image n’a pas pu être lue.", .attention)
+                alfred.annexes?.signaler("Cette image n’a pas pu être lue.")
                 return
             }
             let nom = url.deletingPathExtension().lastPathComponent + ".jpg"

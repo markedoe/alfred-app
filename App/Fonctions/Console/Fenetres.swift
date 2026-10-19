@@ -146,6 +146,13 @@ struct FenetreDocuments: View {
             if let etat = alfred.annexes?.etatDepot {
                 Text(etat).font(.caption).foregroundStyle(Color(.sarcelle))
                     .accessibilityAddTraits(.updatesFrequently)
+            } else if let erreur = alfred.annexes?.erreurDepot {
+                // dans la fenêtre même : l'avis de la console resterait caché dessous
+                Text(erreur)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(red: 1, green: 210 / 255, blue: 201 / 255))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("erreurDepot")
             }
         }
     }
@@ -186,22 +193,27 @@ private struct CarteDocument: View {
                     Text(meta).font(.caption2).foregroundStyle(Color(.texteSecondaire))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Button(arme ? "Confirmer" : "Supprimer") { supprimer() }
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(arme ? Color(red: 1, green: 210 / 255, blue: 201 / 255) : Color(.glace))
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 30)
-                    .background(Console.bouton, in: .rect(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8).strokeBorder(
-                            arme ? Self.rouge : Color(.acier), lineWidth: 1.5)
-                    )
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(.rect)
-                    .disabled(suppression)
-                    .accessibilityLabel(
-                        arme ? "Confirmer la suppression de \(document.nom)" : "Supprimer \(document.nom)")
+                // le cadre et la cible DANS le libellé : hors du bouton, seule la surface du texte se touchait
+                Button {
+                    supprimer()
+                } label: {
+                    Text(arme ? "Confirmer" : "Supprimer")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(arme ? Color(red: 1, green: 210 / 255, blue: 201 / 255) : Color(.glace))
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 30)
+                        .background(Console.bouton, in: .rect(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8).strokeBorder(
+                                arme ? Self.rouge : Color(.acier), lineWidth: 1.5)
+                        )
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(suppression)
+                .accessibilityLabel(
+                    arme ? "Confirmer la suppression de \(document.nom)" : "Supprimer \(document.nom)")
             }
             // le résumé du relais tient en trois lignes (sa consigne) : jamais coupé, à toutes les tailles de texte
             Text(resume)
@@ -311,7 +323,7 @@ struct FenetreNotifications: View {
                     .masqueInvites(alfred.modeInvites)
                     Button("Tout effacer") { Task { await alfred.annexes?.effacerNotifications() } }
                         .buttonStyle(StyleConsole())
-                        .fixedSize()
+                        .largeurDuTexte()
                         .accessibilityIdentifier("effacerNotifications")
                 }
             }

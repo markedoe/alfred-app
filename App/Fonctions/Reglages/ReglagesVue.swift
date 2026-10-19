@@ -48,10 +48,13 @@ struct FenetreReglages: View {
                         .accessibilityIdentifier("version")
                     Spacer(minLength: 12)
                     if let code = URL(string: "https://github.com/markedoe/alfred-app") {
-                        Link("Code source", destination: code)
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color(.faisceau))
-                            .frame(minHeight: 44)
+                        Link(destination: code) {
+                            Text("Code source")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color(.faisceau))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(.rect)
+                        }
                     }
                 }
                 .padding(.top, 18)
@@ -156,7 +159,7 @@ struct FenetreReglages: View {
             }
         }
         .buttonStyle(StyleConsole())
-        .fixedSize()
+        .largeurDuTexte()
         .disabled(conversation.essai != .arrete || conversation.enConversation)
         .accessibilityIdentifier("autoriserMicro")
         Button(conversation.essai == .arrete ? "Tester le micro" : "Arrêter le test") {
@@ -166,7 +169,7 @@ struct FenetreReglages: View {
             }
         }
         .buttonStyle(StyleConsole())
-        .fixedSize()
+        .largeurDuTexte()
         .disabled(conversation.essai == .ouverture || conversation.enConversation || conversation.phase != .repos)
         .accessibilityIdentifier("testerMicro")
     }
@@ -210,12 +213,12 @@ struct FenetreReglages: View {
                     }
                 }
                 .buttonStyle(StyleConsole())
-                .fixedSize()
+                .largeurDuTexte()
                 .padding(.top, 12)
             } else {
                 Button("Se déconnecter", role: .destructive) { confirmer = true }
                     .buttonStyle(StyleConsole(genre: .alerte))
-                    .fixedSize()
+                    .largeurDuTexte()
                     .padding(.top, 12)
             }
         }

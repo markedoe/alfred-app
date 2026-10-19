@@ -85,10 +85,10 @@ final class ParcoursUITests: XCTestCase {
     func testAllumerUnePiece() throws {
         let app = lancer()
         attendrePret(app)
-        let entree = bouton(app, "piece-Entrée")
-        XCTAssertTrue(entree.waitForExistence(timeout: 10))
-        XCTAssertTrue((entree.value as? String ?? "").contains("éteinte"), "\(entree.value ?? "")")
-        entree.tap()
+        let atelier = bouton(app, "piece-Atelier")
+        XCTAssertTrue(atelier.waitForExistence(timeout: 10))
+        XCTAssertTrue((atelier.value as? String ?? "").contains("éteinte"), "\(atelier.value ?? "")")
+        atelier.tap()
         let action = bouton(app, "actionPiece")
         XCTAssertTrue(action.waitForExistence(timeout: 5))
         XCTAssertEqual(action.label, "Allumer")
@@ -100,7 +100,7 @@ final class ParcoursUITests: XCTestCase {
             predicate: NSPredicate(format: "label == %@", "Lumière allumée"), object: etat)
         XCTAssertEqual(XCTWaiter().wait(for: [allumee], timeout: 10), .completed, "la maison n'a pas confirmé")
         XCTAssertEqual(action.label, "Éteindre")
-        XCTAssertTrue((entree.value as? String ?? "").contains("allumée"), "\(entree.value ?? "")")
+        XCTAssertTrue((atelier.value as? String ?? "").contains("allumée"), "\(atelier.value ?? "")")
         capturer(app, "5-piece-allumee")
     }
 
@@ -230,33 +230,63 @@ final class ParcoursUITests: XCTestCase {
     private func hauteurs(_ app: XCUIApplication, captures: Bool = false) -> [String: CGFloat] {
         var h: [String: CGFloat] = [:]
         attendrePret(app)
-        if captures { capturer(app, "grand-texte-1-pieces") }
+        // à la plus grande taille : chaque écran capturé est aussi vérifié en LARGEUR (rien ne sort par le côté)
+        func capturerEtVerifier(_ nom: String) {
+            capturer(app, nom)
+            horsEcran(app, nom)
+        }
+        if captures { capturerEtVerifier("grand-texte-1-pieces") }
         vue(app, "alfred")
         let briefing = app.staticTexts["briefing"]
         XCTAssertTrue(briefing.waitForExistence(timeout: 5))
         h["briefing"] = briefing.frame.height
-        if captures { capturer(app, "grand-texte-2-alfred") }
+        if captures { capturerEtVerifier("grand-texte-2-alfred") }
         vue(app, "environnement")
         let exterieur = element(app, contenant: "Extérieur")
         XCTAssertTrue(exterieur.waitForExistence(timeout: 5))
         h["Extérieur"] = exterieur.frame.height
         if captures {
-            capturer(app, "grand-texte-3-environnement")
+            capturerEtVerifier("grand-texte-3-environnement")
             app.swipeUp()
-            capturer(app, "grand-texte-4-environnement-suite")
+            capturerEtVerifier("grand-texte-4-environnement-suite")
         }
         bouton(app, "reglages").tap()
         let modele = element(app, contenant: "Modèle")
         XCTAssertTrue(modele.waitForExistence(timeout: 5))
         h["Modèle"] = modele.frame.height
         if captures {
-            capturer(app, "grand-texte-5-reglages")
+            capturerEtVerifier("grand-texte-5-reglages")
             app.swipeUp()
-            capturer(app, "grand-texte-6-reglages-suite")
+            capturerEtVerifier("grand-texte-6-reglages-suite")
             app.swipeUp()
-            capturer(app, "grand-texte-7-reglages-fin")
+            capturerEtVerifier("grand-texte-7-reglages-fin")
         }
         return h
+    }
+
+    /// Un texte ou un bouton visible en hauteur mais coupé par le côté de l'écran : ni l'audit d'Apple ni les hauteurs
+    /// ne le voient, la capture si (les Réglages débordaient à gauche en très grand texte, revue du 18.10). Une seule
+    /// lecture de l'arbre (rapide), puis les cadres.
+    private func horsEcran(_ app: XCUIApplication, _ ecran: String) {
+        let largeur = app.frame.width
+        let hauteur = app.frame.height
+        guard let racine = try? app.snapshot() else {
+            XCTFail("\(ecran) : arbre des éléments illisible")
+            return
+        }
+        var fautes: [String] = []
+        func parcourir(_ e: XCUIElementSnapshot) {
+            let f = e.frame
+            if [.staticText, .button].contains(e.elementType), f.width > 0, f.height > 0, f.maxY > 0, f.minY < hauteur,
+                f.minX < -0.5 || f.maxX > largeur + 0.5
+            {
+                fautes.append("« \(e.label) » de \(Int(f.minX)) à \(Int(f.maxX))")
+            }
+            e.children.forEach(parcourir)
+        }
+        parcourir(racine)
+        XCTAssert(
+            fautes.isEmpty, "\(ecran) : sort de l'écran (\(Int(largeur)) pt) : " + fautes.joined(separator: " ; "))
     }
 
     /// Un élément coupé par le bord d'une zone qui défile (en partie dans la vue, en partie dessous).

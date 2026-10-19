@@ -6,6 +6,7 @@ struct AccueilVue: View {
     @Environment(Alfred.self) private var alfred
     @State private var connexion = false
     @State private var debut = Date.now
+    @Environment(\.dynamicTypeSize) private var taille
 
     var body: some View {
         ZStack {
@@ -41,6 +42,11 @@ struct AccueilVue: View {
                                 Rectangle().fill(Color(.alerte)).frame(width: 3)
                             }
                     }
+                    // aux tailles d'accessibilité, la connexion défile avec le reste : fixée en bas, elle prendrait
+                    // tout l'écran et cacherait le motif d'une déconnexion
+                    if taille.isAccessibilitySize {
+                        connexionEtDemo
+                    }
                 }
                 .padding(.horizontal, 24)
                 .frame(maxWidth: 560)
@@ -49,30 +55,37 @@ struct AccueilVue: View {
             .scrollBounceBehavior(.basedOnSize)
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 12) {
-                Button("Se connecter") { connexion = true }
-                    .buttonStyle(StyleConsole(genre: .principal))
-                    .accessibilityIdentifier("seConnecter")
-                Text(
-                    "Avec votre compte Home Assistant, sur le réseau de la maison (ou son VPN). L’appareil vous demandera l’accès au réseau local : c’est par là qu’Alfred joint la maison."
-                )
-                .font(.footnote)
-                .foregroundStyle(Color(.texteSecondaire))
-                .multilineTextAlignment(.center)
-                BoutonDemo()
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
-            .background(Console.bandeau.opacity(0.96).ignoresSafeArea(edges: .bottom))
-            .overlay(alignment: .top) {
-                Rectangle().fill(Color(.trait)).frame(height: 2).accessibilityHidden(true)
+            if !taille.isAccessibilitySize {
+                connexionEtDemo
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
+                    .background(Console.bandeau.opacity(0.96).ignoresSafeArea(edges: .bottom))
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color(.trait)).frame(height: 2).accessibilityHidden(true)
+                    }
             }
         }
         .sheet(isPresented: $connexion) {
             ConnexionVue()
+        }
+    }
+
+    private var connexionEtDemo: some View {
+        VStack(spacing: 12) {
+            Button("Se connecter") { connexion = true }
+                .buttonStyle(StyleConsole(genre: .principal))
+                .accessibilityIdentifier("seConnecter")
+            Text(
+                "Avec votre compte Home Assistant, sur le réseau de la maison (ou son VPN). L’appareil vous demandera l’accès au réseau local : c’est par là qu’Alfred joint la maison."
+            )
+            .font(.footnote)
+            .foregroundStyle(Color(.texteSecondaire))
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            BoutonDemo()
         }
     }
 
