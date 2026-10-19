@@ -117,8 +117,11 @@ final class Conversation {
     }
 
     private func brancher(_ v: any MoteurVoix) {
-        v.surInterruption = { [weak self] in
-            Task { await self?.couper() }
+        v.surInterruption = { [weak self] motif in
+            Task {
+                await self?.couper()
+                if let motif { self?.aviser(motif, .attention) }
+            }
         }
     }
 

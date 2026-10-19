@@ -20,8 +20,9 @@ protocol MoteurVoix: AnyObject {
     func accueillir()
     /// Niveau de la voix d'Alfred (0…1), pour le noyau.
     var niveauVoix: Float { get }
-    /// Appelé quand iOS interrompt le son (appel, alarme, Siri) : la conversation se ferme.
-    var surInterruption: (@MainActor () -> Void)? { get set }
+    /// Appelé quand le son s'arrête sans nous : iOS l'interrompt (appel, alarme, Siri ; motif nil), le matériel change
+    /// (écouteurs mis ou retirés) ou le service média redémarre (motif : ce que la conversation dit). Elle se ferme.
+    var surInterruption: (@MainActor (_ motif: String?) -> Void)? { get set }
     /// Les micros de l'appareil (micro intégré, AirPods, micro USB…), dans l'ordre d'iOS.
     func entrees() -> [EntreeMicro]
     /// Le micro choisi dans Réglages & état (nil : celui d'iOS), gardé sur l'appareil.
@@ -41,37 +42,81 @@ struct EntreeMicro: Identifiable, Equatable, Sendable {
 @MainActor
 final class VoixSysteme: MoteurVoix {
     private let acces: AccesURLSession
-    private let capture = CaptureMicro()
+    // refaits si le service média d'iOS redémarre (doc d'Apple : tous les objets audio sont à recréer)
+    private var capture = CaptureMicro()
     private var lecteurConversation: LecteurVoix?
-    private let lecteurSeul = LecteurVoix()
+    private var lecteurSeul = LecteurVoix()
     private var lecture: Task<Void, Never>?
     private var clip: AVAudioPlayer?
     private var clips: [Int: Data] = [:]
     private var dernierClip = 0
     private var micOuvert = false
     private let journal = Logger(subsystem: "io.github.markedoe.alfred", category: "voix")
-    var surInterruption: (@MainActor () -> Void)?
+    var surInterruption: (@MainActor (_ motif: String?) -> Void)?
     var entreeOubliee = false
-    private var observateur: (any NSObjectProtocol)?
+    private var observateurs: [any NSObjectProtocol] = []
     private let reglages: UserDefaults
     static let cleEntree = "micro.entree"
 
     init(acces: AccesURLSession, reglages: UserDefaults = .standard) {
         self.acces = acces
         self.reglages = reglages
-        observateur = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main
-        ) { [weak self] note in
-            let debut =
-                (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
-                .flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began
-            guard debut else { return }
-            MainActor.assumeIsolated { self?.surInterruption?() }
-        }
+        let centre = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+        observateurs.append(
+            centre.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) {
+                [weak self] note in
+                let debut =
+                    (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
+                    .flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began
+                guard debut else { return }
+                MainActor.assumeIsolated { self?.surInterruption?(nil) }
+            })
+        // le matériel change (écouteurs mis ou retirés, autre fréquence) : le moteur s'arrête seul et se désinitialise
+        // (doc d'Apple, AVAudioEngineConfigurationChangeNotification) ; sans ça, la conversation attendait 90 s un
+        // micro muet, ou la voix d'Alfred une fin qui ne venait pas
+        observateurs.append(
+            centre.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) {
+                [weak self] note in
+                guard let moteur = note.object as AnyObject? else { return }
+                let id = ObjectIdentifier(moteur)
+                MainActor.assumeIsolated { self?.moteurChange(id) }
+            })
+        observateurs.append(
+            centre.addObserver(
+                forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.servicesRedemarres() }
+            })
     }
 
     isolated deinit {
-        if let observateur { NotificationCenter.default.removeObserver(observateur) }
+        for o in observateurs { NotificationCenter.default.removeObserver(o) }
+    }
+
+    /// Un moteur s'est arrêté avec le matériel. Le notre seulement, et seulement s'il est vraiment arrêté (activer le
+    /// traitement de la voix peut aussi annoncer un changement, moteur toujours en marche).
+    private func moteurChange(_ id: ObjectIdentifier) {
+        if micOuvert, id == ObjectIdentifier(capture.moteur), !capture.moteur.isRunning {
+            journal.notice("moteur du micro arrêté par un changement de matériel")
+            surInterruption?("Le son a changé de sortie (écouteurs) : touchez le noyau pour reprendre.")
+        } else if id == ObjectIdentifier(lecteurSeul.moteurAudio), !lecteurSeul.moteurAudio.isRunning {
+            interrompre()
+        }
+    }
+
+    /// Le service média d'iOS a redémarré (rare ; Réglages › Développeur › « Reset Media Services » le provoque) :
+    /// les objets audio sont refaits (doc d'Apple) ; une conversation ouverte se ferme et le dit.
+    private func servicesRedemarres() {
+        journal.notice("service média redémarré")
+        let ouvert = micOuvert
+        interrompre()
+        capture.arreter()
+        lecteurConversation = nil
+        micOuvert = false
+        capture = CaptureMicro()
+        lecteurSeul = LecteurVoix()
+        if ouvert { surInterruption?("Le son de l’appareil a redémarré : touchez le noyau pour reprendre.") }
     }
 
     /// Prépare les clips d'accueil du titre de la personne (Monsieur, Madame, Mademoiselle).
@@ -197,7 +242,7 @@ final class VoixMuette: MoteurVoix {
     private var continuation: AsyncStream<[Float]>.Continuation?
     private(set) var lues: [String] = []
     private(set) var accueils = 0
-    var surInterruption: (@MainActor () -> Void)?
+    var surInterruption: (@MainActor (_ motif: String?) -> Void)?
     var entreeChoisie: String?
     var entreeOubliee = false
 
@@ -216,6 +261,9 @@ final class VoixMuette: MoteurVoix {
         continuation?.finish()
         continuation = nil
     }
+
+    /// Pour les tests : le son s'arrête sans nous (un appel : motif nil ; des écouteurs : un motif).
+    func simulerInterruption(_ motif: String?) { surInterruption?(motif) }
 
     /// Pour les tests : fait « entendre » des échantillons.
     func entendre(_ echantillons: [Float]) { continuation?.yield(echantillons) }

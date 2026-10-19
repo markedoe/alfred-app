@@ -30,6 +30,9 @@ final class LecteurVoix: @unchecked Sendable {
     private var programmes = 0
     private var enLecture = false
 
+    /// Son moteur (pour reconnaître son arrêt par un changement de matériel).
+    var moteurAudio: AVAudioEngine { moteur }
+
     init(moteur: AVAudioEngine = AVAudioEngine(), possedeMoteur: Bool = true) {
         self.moteur = moteur
         self.possedeMoteur = possedeMoteur
@@ -56,7 +59,8 @@ final class LecteurVoix: @unchecked Sendable {
             }
         }
         if !morceau.isEmpty { try analyser(morceau) }
-        while enLecture, joues.withLock({ $0 }) < programmes {
+        // un moteur arrêté (changement de matériel) ne jouera plus rien : on n'attend pas une fin qui ne viendrait pas
+        while enLecture, joues.withLock({ $0 }) < programmes, moteur.isRunning {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -175,6 +179,9 @@ final class LecteurVoix: @unchecked Sendable {
         }
         guard !enLecture else { return }
         do {
+            // le moteur du micro n'est démarré que par la capture : arrêté (micro fermé, matériel changé), la voix ne
+            // le relance pas (son entrée garde l'ancien format)
+            if !moteur.isRunning, !possedeMoteur { return }
             installerMesure()
             if !moteur.isRunning {
                 moteur.prepare()

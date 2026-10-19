@@ -232,6 +232,20 @@ struct ConversationTests {
         try await Self.attendre(c) { $0.phase == .repos }
     }
 
+    @Test("Écouteurs branchés en pleine conversation : elle se ferme, et le dit")
+    func materielChange() async throws {
+        let (c, client, voix) = try await Self.pret()
+        await c.basculerEcoute()
+        #expect(c.enConversation)
+        voix.simulerInterruption("Le son a changé de sortie (écouteurs) : touchez le noyau pour reprendre.")
+        try await Self.attendre(c) { !$0.enConversation && $0.avis?.texte.hasPrefix("Le son a changé") == true }
+        // un appel (sans motif) : fermée aussi, sans rien dire de plus
+        await c.basculerEcoute()
+        voix.simulerInterruption(nil)
+        try await Self.attendre(c) { !$0.enConversation }
+        await client.arreter()
+    }
+
     @Test("Nouvelle conversation : le fil est oublié")
     func nouvelle() async throws {
         let (c, client, _) = try await Self.pret()
