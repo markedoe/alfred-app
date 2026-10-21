@@ -75,11 +75,13 @@ jobs:
           if [[ ! -x "$ictool" ]]; then
             echo "::error::ictool introuvable"; find "$DEVELOPER_DIR/.." -maxdepth 6 -name 'ictool*' || true; exit 1
           fi
-          "$ictool" --help 2>&1 | head -80 || true
+          "$ictool" --version
           mkdir -p "$RUNNER_TEMP/icone"
+          # syntaxe de « ictool --help » (Xcode 26.6) ; le masque d'iOS est déjà appliqué
           for apparence in Default Dark ClearLight ClearDark TintedLight TintedDark; do
-            "$ictool" App/Ressources/AppIcon.icon --export-preview iOS "$apparence" 1024 1024 1 \
-              "$RUNNER_TEMP/icone/$apparence.png"
+            "$ictool" App/Ressources/AppIcon.icon --export-image --output-file "$RUNNER_TEMP/icone/$apparence.png" \
+              --platform iOS --rendition "$apparence" --width 1024 --height 1024 --scale 1
+            [[ -s "$RUNNER_TEMP/icone/$apparence.png" ]] || { echo "::error::rendu $apparence absent"; exit 1; }
           done
           ls -l "$RUNNER_TEMP/icone"
       - name: Rendus
