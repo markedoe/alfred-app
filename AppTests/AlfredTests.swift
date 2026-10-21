@@ -1,6 +1,7 @@
 import AVFAudio
 import AlfredKit
 import Foundation
+import Security
 import Testing
 
 @testable import Alfred
@@ -86,20 +87,113 @@ struct AlfredTests {
     }
 }
 
-/// La session dans le trousseau de l'appareil (le simulateur en a un).
+/// La session dans le trousseau : la logique sur un trousseau simulé (la CI fabrique sans signature : le vrai lui est
+/// fermé, -34018), et le vrai trousseau là où il est accessible.
 @Suite("Trousseau", .serialized)
 struct TrousseauTests {
-    @Test("Écrire, remplacer (mise à jour, jamais d'effacement d'abord), lire, effacer")
-    func cycle() throws {
+    @Test(
+        "Écrire : ajout la 1re fois (propre à l'appareil, jamais synchronisé), mise à jour ensuite, sans effacer d'abord"
+    )
+    func ecrire() throws {
+        let t = TrousseauSimule()
+        try Trousseau.ecrire("premiere", compte: "c", acces: t.acces)
+        #expect(t.appels == ["modifier", "ajouter"])
+        #expect(t.synchronisable == false)
+        #expect(t.accessible == (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String))
+        try Trousseau.ecrire("seconde", compte: "c", acces: t.acces)
+        #expect(t.appels == ["modifier", "ajouter", "modifier"], "une mise à jour : rien n'est effacé d'abord")
+        #expect(Trousseau.lire(compte: "c", acces: t.acces) == "seconde")
+        Trousseau.effacer(compte: "c", acces: t.acces)
+        #expect(Trousseau.lire(compte: "c", acces: t.acces) == nil)
+    }
+
+    @Test("Un ajout refusé est une erreur : l'app le dit (la session n'a pas pu être gardée)")
+    func ajoutRefuse() {
+        let t = TrousseauSimule()
+        t.refusAjout = errSecInteractionNotAllowed
+        #expect(throws: Trousseau.Erreur(statut: errSecInteractionNotAllowed)) {
+            try Trousseau.ecrire("x", compte: "c", acces: t.acces)
+        }
+    }
+
+    @Test("Le vrai trousseau : écrire, remplacer, lire, effacer", .enabled(if: TrousseauTests.accessible))
+    func vrai() throws {
         let compte = "tests.trousseau.\(UUID().uuidString)"
         defer { Trousseau.effacer(compte: compte) }
         #expect(Trousseau.lire(compte: compte) == nil)
         try Trousseau.ecrire("premiere", compte: compte)
-        #expect(Trousseau.lire(compte: compte) == "premiere")
         try Trousseau.ecrire("seconde", compte: compte)
         #expect(Trousseau.lire(compte: compte) == "seconde")
         Trousseau.effacer(compte: compte)
         #expect(Trousseau.lire(compte: compte) == nil)
+    }
+
+    /// Le vrai trousseau répond (une fabrication signée) : un essai, aussitôt effacé.
+    static var accessible: Bool {
+        let element: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword, kSecAttrService: "tests.sonde", kSecAttrAccount: "sonde",
+        ]
+        let statut = SecItemAdd(element.merging([kSecValueData: Data()]) { $1 } as CFDictionary, nil)
+        SecItemDelete(element as CFDictionary)
+        return statut != errSecMissingEntitlement
+    }
+}
+
+/// Un trousseau en mémoire : ce que l'app y fait, appel par appel.
+final class TrousseauSimule: @unchecked Sendable {
+    private let verrou = NSLock()
+    private var _valeur: Data?
+    private var _appels: [String] = []
+    private var _synchronisable: Bool?
+    private var _accessible: String?
+    private var _refusAjout: OSStatus?
+
+    var appels: [String] { verrou.withLock { _appels } }
+    var synchronisable: Bool? { verrou.withLock { _synchronisable } }
+    var accessible: String? { verrou.withLock { _accessible } }
+    var refusAjout: OSStatus? {
+        get { verrou.withLock { _refusAjout } }
+        set { verrou.withLock { _refusAjout = newValue } }
+    }
+
+    var acces: Trousseau.Acces {
+        Trousseau.Acces(
+            copier: { [self] _, resultat in
+                verrou.withLock {
+                    _appels.append("copier")
+                    guard let v = _valeur else { return errSecItemNotFound }
+                    resultat?.pointee = v as CFData
+                    return errSecSuccess
+                }
+            },
+            ajouter: { [self] requete, _ in
+                let d = requete as NSDictionary
+                return verrou.withLock {
+                    _appels.append("ajouter")
+                    if let refus = _refusAjout { return refus }
+                    _synchronisable = d[kSecAttrSynchronizable] as? Bool
+                    _accessible = d[kSecAttrAccessible] as? String
+                    _valeur = d[kSecValueData] as? Data
+                    return errSecSuccess
+                }
+            },
+            modifier: { [self] _, attributs in
+                let d = attributs as NSDictionary
+                return verrou.withLock {
+                    _appels.append("modifier")
+                    guard _valeur != nil else { return errSecItemNotFound }
+                    _valeur = d[kSecValueData] as? Data
+                    _accessible = d[kSecAttrAccessible] as? String
+                    return errSecSuccess
+                }
+            },
+            supprimer: { [self] _ in
+                verrou.withLock {
+                    _appels.append("supprimer")
+                    _valeur = nil
+                    return errSecSuccess
+                }
+            })
     }
 }
 

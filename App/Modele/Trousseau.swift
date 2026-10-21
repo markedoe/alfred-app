@@ -10,7 +10,20 @@ enum Trousseau {
         let statut: OSStatus
     }
 
-    static func lire(compte: String) -> String? {
+    /// Les fonctions du trousseau d'iOS ; les tests en donnent d'autres (une fabrication non signée, celle de la CI,
+    /// n'a pas accès au vrai trousseau : -34018).
+    struct Acces: Sendable {
+        var copier: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+        var ajouter: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+        var modifier: @Sendable (CFDictionary, CFDictionary) -> OSStatus
+        var supprimer: @Sendable (CFDictionary) -> OSStatus
+
+        static let systeme = Acces(
+            copier: { SecItemCopyMatching($0, $1) }, ajouter: { SecItemAdd($0, $1) },
+            modifier: { SecItemUpdate($0, $1) }, supprimer: { SecItemDelete($0) })
+    }
+
+    static func lire(compte: String, acces: Acces = .systeme) -> String? {
         let requete: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -19,14 +32,13 @@ enum Trousseau {
             kSecMatchLimit: kSecMatchLimitOne,
         ]
         var resultat: CFTypeRef?
-        guard SecItemCopyMatching(requete as CFDictionary, &resultat) == errSecSuccess,
-            let donnees = resultat as? Data
+        guard acces.copier(requete as CFDictionary, &resultat) == errSecSuccess, let donnees = resultat as? Data
         else { return nil }
         return String(data: donnees, encoding: .utf8)
     }
 
     /// Remplace la session (mise à jour, sinon ajout) : un échec laisse l'ancienne en place, jamais aucune.
-    static func ecrire(_ valeur: String, compte: String) throws {
+    static func ecrire(_ valeur: String, compte: String, acces: Acces = .systeme) throws {
         let element: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -36,20 +48,20 @@ enum Trousseau {
             kSecValueData: Data(valeur.utf8),
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        var statut = SecItemUpdate(element as CFDictionary, attributs as CFDictionary)
+        var statut = acces.modifier(element as CFDictionary, attributs as CFDictionary)
         if statut == errSecItemNotFound {
             let nouveau = element.merging(attributs) { $1 }.merging([kSecAttrSynchronizable: false]) { $1 }
-            statut = SecItemAdd(nouveau as CFDictionary, nil)
+            statut = acces.ajouter(nouveau as CFDictionary, nil)
         }
         guard statut == errSecSuccess else { throw Erreur(statut: statut) }
     }
 
-    static func effacer(compte: String) {
+    static func effacer(compte: String, acces: Acces = .systeme) {
         let requete: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: compte,
         ]
-        SecItemDelete(requete as CFDictionary)
+        _ = acces.supprimer(requete as CFDictionary)
     }
 }

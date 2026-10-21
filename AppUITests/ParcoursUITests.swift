@@ -88,14 +88,27 @@ final class ParcoursUITests: XCTestCase {
         attendrePret(app)
         let atelier = bouton(app, "piece-Atelier")
         XCTAssertTrue(atelier.waitForExistence(timeout: 10))
+        // ce qui bouge, s'il y a lieu : l'en-tête, la pièce, « Parler », les onglets (dans le message d'échec)
+        let reperes = ["reglages", "piece-Atelier", "parler", "onglet-pieces"].map { bouton(app, $0) }
+        func positions() -> String {
+            reperes.map { "\($0.identifier) \(Int($0.frame.minY))-\(Int($0.frame.maxY))" }.joined(separator: ", ")
+        }
         let avant = atelier.frame
+        let positionsAvant = positions()
+        capturer(app, "clavier-1-avant")
         bouton(app, "ecrire").tap()
         XCTAssertTrue(app.textFields["saisie"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "le clavier ne s'ouvre pas")
-        XCTAssertEqual(atelier.frame.minY, avant.minY, accuracy: 1, "la roue saute à l'ouverture du clavier")
+        capturer(app, "clavier-2-ouvert")
+        XCTAssertEqual(
+            atelier.frame.minY, avant.minY, accuracy: 1,
+            "la roue saute à l'ouverture du clavier : avant \(positionsAvant) ; après \(positions())")
         app.buttons["Fermer la saisie"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        XCTAssertEqual(atelier.frame.minY, avant.minY, accuracy: 1, "la roue saute à la fermeture du clavier")
+        capturer(app, "clavier-3-ferme")
+        XCTAssertEqual(
+            atelier.frame.minY, avant.minY, accuracy: 1,
+            "la roue saute à la fermeture du clavier : avant \(positionsAvant) ; après \(positions())")
     }
 
     /// Échap (clavier de l'iPad, Mac) ferme, comme la console : la saisie, puis la pièce (revue du 18.10, point 13).
