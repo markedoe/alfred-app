@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024px" height="1024px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>1-halo</title>
+    <defs>
+        <radialGradient id="halo" cx="512" cy="512" r="440" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#61caff" stop-opacity=".55"/>
+            <stop offset=".45" stop-color="#61caff" stop-opacity=".16"/>
+            <stop offset="1" stop-color="#61caff" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="lueur" cx="512" cy="512" r="190" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#61caff" stop-opacity=".75"/>
+            <stop offset=".45" stop-color="#61caff" stop-opacity=".45"/>
+            <stop offset="1" stop-color="#61caff" stop-opacity="0"/>
+        </radialGradient>
+    </defs>
+    <path d="M512 72A440 440 0 1 1 512 952A440 440 0 1 1 512 72Z" fill="url(#halo)"/>
+    <path d="M512 322A190 190 0 1 1 512 702A190 190 0 1 1 512 322Z" fill="url(#lueur)"/>
+</svg>

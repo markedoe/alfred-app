@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024px" height="1024px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>3-anneau</title>
+    <defs>
+        <linearGradient id="faisceau" x1="250" y1="150" x2="780" y2="880" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#a6e4ff"/>
+            <stop offset=".5" stop-color="#61caff"/>
+            <stop offset="1" stop-color="#2c86ba"/>
+        </linearGradient>
+    </defs>
+    <path d="M808.6 367.34A330 330 0 1 1 488.98 182.8L493.17 242.66A270 270 0 1 0 754.67 393.64Z" fill="url(#faisceau)"/>
+</svg>

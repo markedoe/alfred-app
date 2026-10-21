@@ -78,11 +78,14 @@ swift test --package-path Paquets/AlfredKit
 
 **Démo :** l’argument de lancement `-demo` ouvre l’app sur la maison de démonstration.
 
+**Icône :** `App/Ressources/AppIcon.icon` (format d’Icon Composer, verre liquide d’iOS 26) est produite par
+`python3 scripts/outils/icone.py` ; elle ne se modifie pas à la main (un test vérifie qu’elle est à jour).
+
 ## Intégration et livraison
 
 | Workflow | Quand | Quoi |
 |---|---|---|
-| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) |
+| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift, des workflows et des outils Python |
 | `TestFlight` | À la main, ou sur une étiquette `v*` | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes, puis aux testeurs externes après l’examen d’Apple (« externe », coché par défaut) ; à la main, « envoyer » décoché : archive et export signés seulement |
 | `Testeurs externes` | À la main, ou appelé par `TestFlight` | Groupe externe sans lien public, informations de test et contact de l’examen d’Apple, envoi d’une fabrication à l’examen, invitations ; aucune donnée personnelle dans le journal (secrets masqués champ par champ) |

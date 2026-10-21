@@ -47,8 +47,49 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Tests (API d'App Store Connect simulée, aucun secret)
+      - name: Tests (API d'App Store Connect simulée, aucun secret ; icône à jour)
         run: python3 -m unittest discover -s scripts/outils -p 'test_*.py' -v
+
+  icone:
+    name: Icône (compilée et rendue par les outils d'Apple)
+    runs-on: macos-26
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compilation (actool, comme Xcode)
+        run: |
+          mkdir -p "$RUNNER_TEMP/actool"
+          xcrun actool App/Ressources/AppIcon.icon --compile "$RUNNER_TEMP/actool" --platform iphoneos \
+            --minimum-deployment-target 26.0 --target-device iphone --target-device ipad --app-icon AppIcon \
+            --output-partial-info-plist "$RUNNER_TEMP/actool/partiel.plist" \
+            --errors --warnings --notices --output-format human-readable-text
+          plutil -p "$RUNNER_TEMP/actool/partiel.plist"
+          grep -q AppIcon "$RUNNER_TEMP/actool/partiel.plist" || { echo "::error::icône absente du résultat"; exit 1; }
+      - name: Rendu des six apparences (ictool, l'outil d'Icon Composer)
+        run: |
+          ictool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          if [[ ! -x "$ictool" ]]; then
+            echo "::error::ictool introuvable"; find "$DEVELOPER_DIR/.." -maxdepth 6 -name 'ictool*' || true; exit 1
+          fi
+          "$ictool" --help 2>&1 | head -80 || true
+          mkdir -p "$RUNNER_TEMP/icone"
+          for apparence in Default Dark ClearLight ClearDark TintedLight TintedDark; do
+            "$ictool" App/Ressources/AppIcon.icon --export-preview iOS "$apparence" 1024 1024 1 \
+              "$RUNNER_TEMP/icone/$apparence.png"
+          done
+          ls -l "$RUNNER_TEMP/icone"
+      - name: Rendus
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: icone
+          path: ${{ runner.temp }}/icone
+          retention-days: 14
+          if-no-files-found: ignore
 
   noyau-linux:
     name: AlfredKit (Linux)

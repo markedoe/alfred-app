@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024px" height="1024px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>2-cadran</title>
+    <defs>
+    </defs>
+    <path d="M512 313.5A198.5 198.5 0 1 1 512 710.5A198.5 198.5 0 1 1 512 313.5ZM512 318.5A193.5 193.5 0 1 1 512 705.5A193.5 193.5 0 1 1 512 318.5Z" fill="#e0f4ff" fill-opacity=".28" fill-rule="evenodd"/>
+</svg>

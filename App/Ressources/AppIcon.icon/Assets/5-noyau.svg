@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024px" height="1024px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>5-noyau</title>
+    <defs>
+        <radialGradient id="noyau" cx=".42" cy=".38" r=".62">
+            <stop offset="0" stop-color="#ffffff"/>
+            <stop offset=".35" stop-color="#e0f4ff"/>
+            <stop offset=".8" stop-color="#61caff"/>
+            <stop offset="1" stop-color="#2c86ba"/>
+        </radialGradient>
+    </defs>
+    <path d="M512 428A84 84 0 1 1 512 596A84 84 0 1 1 512 428Z" fill="url(#noyau)"/>
+</svg>
