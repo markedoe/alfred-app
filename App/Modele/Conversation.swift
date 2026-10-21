@@ -393,7 +393,7 @@ final class Conversation {
     /// pendant la voix d'Alfred une fois son tour fini (elle le fait taire) ; jamais pendant la réflexion.
     var peutEcrire: Bool {
         if envoiEnCours { return false }
-        switch phase {
+        return switch phase {
         case .repos: true
         case .ecoute: !tourOuvert
         case .reponse: finRecue
