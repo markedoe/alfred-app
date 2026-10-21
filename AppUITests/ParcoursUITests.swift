@@ -93,6 +93,9 @@ final class ParcoursUITests: XCTestCase {
         func positions() -> String {
             reperes.map { "\($0.identifier) \(Int($0.frame.minY))-\(Int($0.frame.maxY))" }.joined(separator: ", ")
         }
+        let jauges = app.descendants(matching: .any).matching(identifier: "jauge")
+        let nombreDeJauges = jauges.count
+        XCTAssertGreaterThan(nombreDeJauges, 0, "les jauges de la console")
         let avant = atelier.frame
         let positionsAvant = positions()
         capturer(app, "clavier-1-avant")
@@ -100,6 +103,7 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertTrue(app.textFields["saisie"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "le clavier ne s'ouvre pas")
         capturer(app, "clavier-2-ouvert")
+        XCTAssertEqual(jauges.count, nombreDeJauges, "les jauges disparaissent quand le clavier s'ouvre")
         XCTAssertEqual(
             atelier.frame.minY, avant.minY, accuracy: 1,
             "la roue saute à l'ouverture du clavier : avant \(positionsAvant) ; après \(positions())")
@@ -117,15 +121,20 @@ final class ParcoursUITests: XCTestCase {
         attendrePret(app)
         let atelier = bouton(app, "piece-Atelier")
         XCTAssertTrue(atelier.waitForExistence(timeout: 10))
+        // d'abord la pièce seule : si la touche n'y arrive pas, c'est le simulateur (pas de clavier matériel)
+        atelier.tap()
+        XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        if !bouton(app, "actionPiece").waitForNonExistence(timeout: 3) {
+            throw XCTSkip("Échap : la touche n'arrive pas à l'app sur ce simulateur (pas de clavier matériel)")
+        }
+        // la touche arrive : la saisie (champ actif), puis la pièce
         atelier.tap()
         XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
         bouton(app, "ecrire").tap()
         XCTAssertTrue(app.textFields["saisie"].waitForExistence(timeout: 5))
         app.typeKey(.escape, modifierFlags: [])
-        // sans clavier matériel relié au simulateur, la touche n'arrive pas : ce n'est pas l'app qui est en faute
-        if !app.textFields["saisie"].waitForNonExistence(timeout: 3) {
-            throw XCTSkip("Échap : la touche n'arrive pas à l'app sur ce simulateur (pas de clavier matériel)")
-        }
+        XCTAssertTrue(app.textFields["saisie"].waitForNonExistence(timeout: 3), "Échap : la saisie d'abord")
         XCTAssertTrue(bouton(app, "actionPiece").exists, "la pièce reste ouverte")
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(bouton(app, "actionPiece").waitForNonExistence(timeout: 5), "Échap : puis la pièce")

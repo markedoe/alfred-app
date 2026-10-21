@@ -23,7 +23,7 @@ struct ConsoleVue: View {
     @State private var debut = Date.now
     /// La hauteur de la console sans le clavier, mesurée sur la pile qui l'ignore : elle ne bouge ni quand le clavier
     /// s'ouvre, ni pendant qu'il se ferme ; les jauges ne disparaissent pas et la roue ne saute pas (revues du 18.10 et
-    /// du 21.10 : mesurée sur la place laissée par le clavier, elle sautait encore à la fermeture).
+    /// du 21.10 : mesurée sur la place laissée par le clavier, les jauges disparaissaient et la roue descendait).
     @State private var hauteurSansClavier: CGFloat = 0
 
     enum VueConsole: Hashable, CaseIterable {
@@ -64,12 +64,14 @@ struct ConsoleVue: View {
                         NavConsole(vue: $vue)
                     }
                 }
-                .ignoresSafeArea(.keyboard)
+                // mesurée sur la pile elle-même, AVANT « ignoresSafeArea » : après, c'est le cadre réduit par le
+                // clavier (CI du 21.10 : les jauges disparaissaient, la roue descendait de 22 pt)
                 .onGeometryChange(for: CGFloat.self) {
                     $0.size.height
                 } action: {
                     hauteurSansClavier = $0
                 }
+                .ignoresSafeArea(.keyboard)
                 if ecrire {
                     // comme la console : la saisie se ferme à l'envoi, et le téléphone montre les échanges
                     SaisieConsole(ouverte: $ecrire) { if !large { vue = .alfred } }
@@ -482,6 +484,7 @@ private struct Jauges: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(j.description)
                 .accessibilityValue(Format.valeur(v, " " + j.unite, j.decimalesBandeau))
+                .accessibilityIdentifier("jauge")
             }
         }
         // des instruments, à la taille de la console ; les mêmes valeurs suivent le texte dans Environnement
