@@ -49,15 +49,28 @@ struct AnnexesTests {
         a.suspendre()
     }
 
-    @Test("Un document de plus de 20 Mo n'est pas envoyé")
+    @Test("Un document de plus de 20 Mo n'est pas envoyé : l'erreur est dans la fenêtre, puis oubliée à sa fermeture")
     func tropLourd() async throws {
-        let a = try await Self.pretes()
+        let avis = Recueil()
+        let a = Annexes(acces: AccesDemo()) { texte, _ in avis.textes.append(texte) }
+        a.demarrer(connecte: true)
+        try await Self.attendre { !a.documents.isEmpty }
+        // le refus est immédiat (rien ne part) : vérifié dès le retour, sans attente
         await a.deposer(
             DepotDocument(
                 fichier: Data(count: DepotDocument.tailleMax + 1), nomFichier: "gros.pdf", type: "application/pdf"))
-        try await Task.sleep(for: .milliseconds(100))
         #expect(a.documents.count == 1 && a.etatDepot == nil)
+        #expect(a.erreurDepot == "Document trop lourd : 20 Mo au plus.", "dans la fenêtre Documents (point 11)")
+        #expect(avis.textes == ["Document trop lourd : 20 Mo au plus."])
+        a.oublierErreurDepot()
+        #expect(a.erreurDepot == nil)
         a.suspendre()
+    }
+
+    @Test("L'identifiant d'un document ne vise jamais une autre route")
+    func segment() {
+        #expect(Annexes.segment("42") == "42")
+        #expect(Annexes.segment("../notifications/effacer") == "..%2Fnotifications%2Feffacer")
     }
 
     @Test("Notifications : lues, puis effacées")
@@ -80,4 +93,10 @@ struct AnnexesTests {
         #expect(!a.notificationsPermises && a.liens.isEmpty)
         a.suspendre()
     }
+}
+
+/// Les avis reçus (une boîte : la fonction des avis est isolée sur l'acteur principal, donc envoyable).
+@MainActor
+final class Recueil {
+    var textes: [String] = []
 }

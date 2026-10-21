@@ -210,9 +210,21 @@ final class Annexes {
         aviser(message, .attention)
     }
 
+    /// La fenêtre Documents se ferme : l'échec d'un dépôt passé n'y reste pas (rouverte le lendemain, elle le
+    /// montrait encore).
+    func oublierErreurDepot() {
+        erreurDepot = nil
+    }
+
+    /// L'identifiant d'un document dans un chemin : « / » échappé aussi (il ne doit jamais viser une autre route).
+    static func segment(_ id: String) -> String {
+        var permis = CharacterSet.urlPathAllowed
+        permis.remove("/")
+        return id.addingPercentEncoding(withAllowedCharacters: permis) ?? id
+    }
+
     func supprimer(_ document: DocumentMaison) async {
-        let chemin =
-            "/docs/" + (document.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? document.id)
+        let chemin = "/docs/" + Self.segment(document.id)
         do {
             let (statut, _) = try await acces.envoyer(RequeteRelais(.delete, chemin))
             guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }

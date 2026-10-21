@@ -100,6 +100,11 @@ public actor ClientRelais {
     private var minuterieTour: Task<Void, Never>?
     private var commandes: [String: (commande: Commande, minuterie: Task<Void, Never>)] = [:]
     private var boucle: Task<Void, Never>?
+    /// Le numéro de la liaison en cours (il change à chaque coupure) : une synchronisation n'agit que pour la liaison qui
+    /// l'a lancée. Coupée pendant la lecture de la maison, elle ne doit ni annoncer une erreur (la coupure a déjà dit
+    /// « déconnecté »), ni écrire sur la liaison suivante.
+    private var generation = 0
+    private var synchro: Task<Void, Never>?
 
     public nonisolated let nouvelles: AsyncStream<Nouvelle>
     private let annonce: AsyncStream<Nouvelle>.Continuation
@@ -158,6 +163,9 @@ public actor ClientRelais {
     }
 
     private func coupure() {
+        generation += 1
+        synchro?.cancel()
+        synchro = nil
         sortie?.finish()
         sortie = nil
         liaison = nil
@@ -185,7 +193,9 @@ public actor ClientRelais {
         switch m {
         case .pret(let v):
             changer(.synchronisation)
-            Task { await self.synchroniser(versionHA: v) }
+            let g = generation
+            synchro?.cancel()
+            synchro = Task { await self.synchroniser(versionHA: v, generation: g) }
         case .fatal(let message):
             changer(.fatal(message))
         case .resultat(let r):
@@ -207,24 +217,34 @@ public actor ClientRelais {
         }
     }
 
-    private func synchroniser(versionHA: String?) async {
+    /// Après chaque attente, la synchronisation vérifie que sa liaison est toujours là (`generation`) : sinon elle
+    /// s'arrête sans rien dire ni rien envoyer.
+    private func synchroniser(versionHA: String?, generation g: Int) async {
         do {
             let r = try await demander(["type": "get_states"])
+            guard g == generation else { return }
             guard r.succes else { throw ErreurRelais("Synchronisation de la maison impossible") }
             maison.charger(r.valeur)
             nombreEntites = r.valeur?.liste?.count ?? 0
             annonce.yield(.maisonChargee)
             envoyer(["type": "subscribe_events", "event_type": "state_changed"])
-            structure = await lireStructure()
+            let s = await lireStructure()
+            guard g == generation else { return }
+            structure = s
             annonce.yield(.structureChargee)
-            console = await lireConsole()
+            let c = await lireConsole()
+            guard g == generation else { return }
+            console = c
             annonce.yield(.consoleChargee)
             // prêt seulement quand le pipeline est connu : un tour lancé avant partirait sur un autre pipeline
             let p = try await demander(["type": "assist_pipeline/pipeline/list"])
+            guard g == generation else { return }
             pipelinePrefere = p.succes ? p.valeur?["preferred_pipeline"]?.texte : nil
             moteurConversation = Self.moteur(p.succes ? p.valeur : nil, pipeline: pipelinePrefere)
             changer(.pret(versionHA: versionHA))
         } catch {
+            // la liaison est tombée pendant la synchronisation : la coupure l'a déjà dit, et la reconnexion suit
+            guard g == generation, (error as? ErreurRelais) != .lienCoupe else { return }
             changer(.fatal((error as? ErreurRelais)?.message ?? "Synchronisation de la maison impossible"))
             await liaison?.fermer()
         }

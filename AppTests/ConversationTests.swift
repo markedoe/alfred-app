@@ -35,6 +35,62 @@ struct ConversationTests {
         Issue.record("attente dépassée")
     }
 
+    /// La conversation contre un relais de test, reliée comme dans `Alfred.traiter` : les signaux du tour vont à la
+    /// conversation ; la liaison perdue après « prêt » la coupe.
+    static func monter(_ relais: RelaisDeTest) async throws -> (Conversation, ClientRelais, VoixMuette) {
+        let voix = VoixMuette()
+        let reglages = UserDefaults(suiteName: "tests.conversation")!
+        reglages.removePersistentDomain(forName: "tests.conversation")
+        let c = Conversation(voix: voix, reglages: reglages)
+        var r = ClientRelais.Reglages()
+        r.reconnexionInitiale = .milliseconds(50)
+        r.reconnexionMaximale = .milliseconds(100)
+        let client = ClientRelais(acces: relais, reglages: r)
+        c.client = client
+        let ecoute = Task { @MainActor in
+            var etaitPret = false
+            for await n in client.nouvelles {
+                switch n {
+                case .tour(let s): c.recevoir(s)
+                case .etat(let e):
+                    if case .pret = e {
+                        etaitPret = true
+                    } else if etaitPret {
+                        etaitPret = false
+                        await c.couper()
+                    }
+                default: break
+                }
+            }
+        }
+        _ = ecoute
+        await client.demarrer()
+        try await attendrePret(client)
+        return (c, client, voix)
+    }
+
+    static func attendrePret(_ client: ClientRelais) async throws {
+        for _ in 0..<300 {
+            if case .pret = await client.etat { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("maison jamais prête")
+    }
+
+    /// Ouvre une conversation et commence une phrase sans la finir : le tour à la voix est en vol.
+    static func parlerSansFinir(_ c: Conversation, _ voix: VoixMuette, _ relais: RelaisDeTest) async throws {
+        await c.basculerEcoute()
+        #expect(c.enConversation)
+        // 100 ms de quasi-silence (le plancher de bruit descend), puis 400 ms de voix : une attaque
+        voix.entendre([Float](repeating: 0.001, count: 1600))
+        for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        for _ in 0..<300 {
+            if await !relais.tours().isEmpty { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("aucun tour à la voix")
+    }
+
     @Test("Une demande écrite : la question, l'action d'Alfred (faite), la réponse ; puis le repos")
     func ecrite() async throws {
         let (c, client, voix) = try await Self.pret()
@@ -87,14 +143,19 @@ struct ConversationTests {
         #expect(c.messages.isEmpty && c.phase == .repos)
     }
 
-    @Test("Demande lente : le clip d'accueil part dès la transcription")
-    func accueil() {
-        let voix = VoixMuette()
-        let c = Conversation(voix: voix)
+    @Test("Demande lente : le clip d'accueil part dès la transcription, micro ouvert seulement")
+    func accueil() async throws {
+        let (c, client, voix) = try await Self.pret()
+        await c.basculerEcoute()
         c.recevoir(.transcrit("Cherche la recette de la fondue"))
         #expect(voix.accueils == 1)
         c.recevoir(.transcrit("Allume le salon"))
         #expect(voix.accueils == 1)
+        // la conversation fermée pendant la réflexion : plus de clip (la session audio n'est plus active)
+        await c.couper()
+        c.recevoir(.transcrit("Cherche la recette de la fondue"))
+        #expect(voix.accueils == 1)
+        await client.arreter()
     }
 
     @Test("Détails techniques : un outil annoncé deux fois n'apparaît qu'une fois ; son échec se voit")
@@ -185,18 +246,101 @@ struct ConversationTests {
         await client.arreter()
     }
 
-    @Test("Un fil neuf à chaque conversation, et pour une question écrite hors conversation")
+    @Test("Un fil neuf à chaque conversation, et pour chaque question écrite hors conversation (le fil ENVOYÉ)")
     func filNeuf() async throws {
-        let (c, client, _) = try await Self.pret()
+        let relais = RelaisDeTest()
+        let (c, client, _) = try await Self.monter(relais)
         #expect(await c.ecrire("Quelle heure est-il ?"))
         try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 2 }
-        #expect(c.conversationId == "demo", "le fil rendu par la maison")
-        await c.basculerEcoute()
-        #expect(c.enConversation && c.conversationId == nil)
-        await c.terminer()
-        #expect(await c.ecrire("Allume la cuisine"))
-        #expect(c.conversationId == nil, "hors conversation : la question part sans fil")
+        #expect(c.conversationId == RelaisDeTest.fil, "le fil rendu par la maison")
+        // une 2e question écrite, hors conversation : sans fil, malgré celui que la maison vient de rendre
+        #expect(await c.ecrire("Et demain ?"))
         try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 4 }
+        // une conversation : un fil neuf, que l'écrit garde ensuite
+        await c.basculerEcoute()
+        #expect(await c.ecrire("Allume la cuisine"))
+        try await Self.attendre(c) { $0.phase == .ecoute && $0.messages.count == 6 }
+        #expect(await c.ecrire("Et le salon ?"))
+        try await Self.attendre(c) { $0.phase == .ecoute && $0.messages.count == 8 }
+        await c.couper()
+        #expect(await relais.tours().map(\.fil) == [nil, nil, nil, RelaisDeTest.fil])
+        await client.arreter()
+    }
+
+    @Test("Écrire dans une conversation : elle reste ouverte, la réponse est lue, puis Alfred réécoute (21.10)")
+    func ecrireEnConversation() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, voix) = try await Self.monter(relais)
+        await c.basculerEcoute()
+        #expect(c.enConversation && c.phase == .ecoute)
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        #expect(c.enConversation, "la conversation reste ouverte (la console : talk)")
+        try await Self.attendre(c) { $0.phase == .ecoute && $0.messages.count == 2 }
+        #expect(c.enConversation)
+        #expect(c.messages[1].texte == RelaisDeTest.reponse)
+        #expect(voix.lues == ["/tts/test.mp3"], "dans une conversation, la réponse est lue")
+        #expect(c.annonce == nil, "micro ouvert : rien n'est annoncé à VoiceOver")
+        await c.couper()
+        await client.arreter()
+    }
+
+    @Test("Double appui sur « Envoyer » : une seule question part, sans faux avis")
+    func doubleEnvoi() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, _) = try await Self.monter(relais)
+        async let premier = c.ecrire("Quelle heure est-il ?")
+        async let second = c.ecrire("Quelle heure est-il ?")
+        let partis = await [premier, second].filter { $0 }
+        #expect(partis.count == 1)
+        #expect(c.avis == nil, "pas de « Alfred termine la demande précédente »")
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 2 }
+        #expect(await relais.tours().count == 1)
+        await client.arreter()
+    }
+
+    @Test("VoiceOver : la réponse écrite non lue est annoncée ; lue à voix haute, elle ne l'est pas")
+    func annonceVoiceOver() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, voix) = try await Self.monter(relais)
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        try await Self.attendre(c) { $0.phase == .repos && $0.annonce != nil }
+        #expect(c.annonce?.texte == RelaisDeTest.reponse)
+        #expect(voix.lues.isEmpty)
+        let premiere = c.annonce
+        c.lireReponsesEcrites = true
+        #expect(await c.ecrire("Et demain ?"))
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 4 }
+        #expect(c.annonce == premiere, "lue à voix haute : pas annoncée")
+        #expect(voix.lues.count == 1)
+        await client.arreter()
+    }
+
+    @Test("Coupure en pleine phrase : la conversation se ferme et l'app revient au repos ; le noyau répond (21.10)")
+    func coupureEnPleinePhrase() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, voix) = try await Self.monter(relais)
+        try await Self.parlerSansFinir(c, voix, relais)
+        await relais.liaisons.last?.fermer()
+        // avant la correction : la fermeture remettait la réflexion, pour toujours
+        try await Self.attendre(c) { !$0.enConversation && $0.phase == .repos }
+        #expect(c.messages.last?.erreur == true)
+        try await Self.attendrePret(client)
+        #expect(c.phase == .repos && c.peutEcrire)
+        await c.basculerEcoute()
+        #expect(c.enConversation, "le noyau rouvre une conversation")
+        await c.couper()
+        await client.arreter()
+    }
+
+    @Test("Tour refusé en pleine phrase : même retour au repos, sans coupure")
+    func refusEnPleinePhrase() async throws {
+        let relais = RelaisDeTest()
+        relais.refuserTours = true
+        let (c, client, voix) = try await Self.monter(relais)
+        try await Self.parlerSansFinir(c, voix, relais)
+        try await Self.attendre(c) { !$0.enConversation && $0.phase == .repos }
+        #expect(c.peutEcrire)
+        #expect(c.annonce != nil, "l'échec est annoncé une fois le micro fermé")
         await client.arreter()
     }
 
@@ -237,12 +381,16 @@ struct ConversationTests {
         let (c, client, voix) = try await Self.pret()
         await c.basculerEcoute()
         #expect(c.enConversation)
-        voix.simulerInterruption("Le son a changé de sortie (écouteurs) : touchez le noyau pour reprendre.")
-        try await Self.attendre(c) { !$0.enConversation && $0.avis?.texte.hasPrefix("Le son a changé") == true }
+        voix.simulerInterruption(VoixSysteme.motifMateriel)
+        try await Self.attendre(c) { !$0.enConversation && $0.avis?.texte == VoixSysteme.motifMateriel }
+        let avis = try #require(c.avis)
+        c.oublierAvis(avis)
         // un appel (sans motif) : fermée aussi, sans rien dire de plus
         await c.basculerEcoute()
+        #expect(c.enConversation, "rouverte")
         voix.simulerInterruption(nil)
         try await Self.attendre(c) { !$0.enConversation }
+        #expect(c.avis == nil)
         await client.arreter()
     }
 

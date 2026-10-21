@@ -7,6 +7,7 @@ struct AccueilVue: View {
     @State private var connexion = false
     @State private var debut = Date.now
     @Environment(\.dynamicTypeSize) private var taille
+    @AccessibilityFocusState private var motifLu: Bool
 
     var body: some View {
         ZStack {
@@ -15,6 +16,20 @@ struct AccueilVue: View {
                 VStack(spacing: 28) {
                     Marque()
                         .padding(.top, 32)
+                    // le motif d'une déconnexion, sous la marque : visible sans défiler (la connexion est fixée en bas),
+                    // et VoiceOver y va d'abord
+                    if let motif = alfred.motifAccueil {
+                        Text(motif)
+                            .font(.callout)
+                            .foregroundStyle(Color(.alerte))
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(alignment: .leading) {
+                                Rectangle().fill(Color(.alerte)).frame(width: 3)
+                            }
+                            .accessibilityFocused($motifLu)
+                            .accessibilityIdentifier("motifAccueil")
+                    }
                     Reacteur(phase: .repos, niveau: { 0 }, rayon: 150, debut: debut, sousTitre: "À VOTRE SERVICE")
                         .frame(width: 300, height: 300)
                     VStack(alignment: .leading, spacing: 18) {
@@ -32,18 +47,8 @@ struct AccueilVue: View {
                                 "Votre voix ne va que vers votre maison, jamais sur internet. Le micro n’écoute que quand vous lui parlez."
                         )
                     }
-                    if let motif = alfred.motifAccueil {
-                        Text(motif)
-                            .font(.callout)
-                            .foregroundStyle(Color(.alerte))
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .overlay(alignment: .leading) {
-                                Rectangle().fill(Color(.alerte)).frame(width: 3)
-                            }
-                    }
                     // aux tailles d'accessibilité, la connexion défile avec le reste : fixée en bas, elle prendrait
-                    // tout l'écran et cacherait le motif d'une déconnexion
+                    // tout l'écran
                     if taille.isAccessibilitySize {
                         connexionEtDemo
                     }
@@ -70,6 +75,12 @@ struct AccueilVue: View {
         }
         .sheet(isPresented: $connexion) {
             ConnexionVue()
+        }
+        .task(id: alfred.motifAccueil) {
+            guard alfred.motifAccueil != nil else { return }
+            // après le changement d'écran, que VoiceOver annonce lui-même
+            try? await Task.sleep(for: .milliseconds(600))
+            motifLu = true
         }
     }
 

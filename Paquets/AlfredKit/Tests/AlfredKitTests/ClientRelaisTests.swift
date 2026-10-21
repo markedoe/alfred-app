@@ -57,7 +57,13 @@ final class AccesFactice: AccesRelais, @unchecked Sendable {
     private var _liaisons: [LiaisonFactice] = []
     private var _structure: ValeurJSON?
     private var _console: ValeurJSON?
+    private var _avantStructure: (@Sendable () async -> Void)?
     var liaisons: [LiaisonFactice] { verrou.withLock { _liaisons } }
+    /// Attendue avant de répondre à `/maison/structure` : un test y retient la synchronisation.
+    var avantStructure: (@Sendable () async -> Void)? {
+        get { verrou.withLock { _avantStructure } }
+        set { verrou.withLock { _avantStructure = newValue } }
+    }
     /// La réponse de `/maison/structure` ; nil = 404 (relais d'avant la route).
     var structure: ValeurJSON? {
         get { verrou.withLock { _structure } }
@@ -77,9 +83,25 @@ final class AccesFactice: AccesRelais, @unchecked Sendable {
     }
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
+        if chemin == "/maison/structure", let attendre = avantStructure { await attendre() }
         let reponse = chemin == "/maison/structure" ? structure : chemin == "/maison/console" ? console : nil
         guard let reponse else { return (404, Data()) }
         return (200, Data(reponse.enTexte().utf8))
+    }
+}
+
+/// Une porte fermée jusqu'à `ouvrir()` (retenir une étape, puis la libérer).
+actor Porte {
+    private var ouverte = false
+    private var attentes: [CheckedContinuation<Void, Never>] = []
+    func passer() async {
+        if ouverte { return }
+        await withCheckedContinuation { attentes.append($0) }
+    }
+    func ouvrir() {
+        ouverte = true
+        attentes.forEach { $0.resume() }
+        attentes = []
     }
 }
 
@@ -186,6 +208,49 @@ struct ClientRelaisTests {
         #expect(await b.client.maison["light.a"]?.etat == "off")
         #expect(
             await l.messages().allSatisfy { $0["access_token"] == nil }, "rien qui ressemble à une authentification")
+        await b.client.arreter()
+    }
+
+    @Test(
+        "Coupure pendant la lecture des états : « déconnecté », jamais une erreur fatale ; la liaison suivante se synchronise"
+    )
+    func coupurePendantLesEtats() async throws {
+        let b = await Self.banc()
+        defer { b.ecoute.cancel() }
+        let l0 = try await b.liaison(0)
+        await l0.pousser(#"{"type":"ready","ha_version":"2026.9.4"}"#)
+        _ = try await b.envoye("get_states", liaison: 0)
+        await l0.fermer()
+        try await b.connecter(liaison: 1)
+        let etats = await b.nouvelles().compactMap { n -> ClientRelais.Etat? in
+            if case .etat(let e) = n { return e }
+            return nil
+        }
+        #expect(!etats.contains { if case .fatal = $0 { true } else { false } }, "\(etats)")
+        #expect(etats.contains(.deconnecte))
+        await b.client.arreter()
+    }
+
+    @Test(
+        "Coupure pendant la lecture de la structure : l'ancienne synchronisation n'écrit rien sur la nouvelle liaison")
+    func coupurePendantLaStructure() async throws {
+        let b = await Self.banc()
+        defer { b.ecoute.cancel() }
+        let porte = Porte()
+        b.fabrique.avantStructure = { await porte.passer() }
+        let l0 = try await b.liaison(0)
+        await l0.pousser(#"{"type":"ready","ha_version":"2026.9.4"}"#)
+        try await b.repondre(try await b.envoye("get_states", liaison: 0), resultat: [], liaison: 0)
+        // l'ancienne synchronisation attend la structure ; la liaison tombe, une autre s'ouvre
+        await l0.fermer()
+        let l1 = try await b.liaison(1)
+        b.fabrique.avantStructure = nil
+        await porte.ouvrir()
+        try await b.connecter(liaison: 1)
+        let types = await l1.messages().compactMap { $0["type"]?.texte }
+        #expect(types == ["get_states", "subscribe_events", "assist_pipeline/pipeline/list"], "\(types)")
+        let prets = await b.nouvelles().filter { if case .etat(.pret) = $0 { true } else { false } }
+        #expect(prets.count == 1)
         await b.client.arreter()
     }
 

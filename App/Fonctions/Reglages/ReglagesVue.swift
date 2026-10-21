@@ -171,6 +171,8 @@ struct FenetreReglages: View {
         .buttonStyle(StyleConsole())
         .largeurDuTexte()
         .disabled(conversation.essai == .ouverture || conversation.enConversation || conversation.phase != .repos)
+        // VoiceOver se tait quand le micro s'ouvre (sinon l'essai l'entend, et dit « Signal reçu » à tort)
+        .accessibilityAddTraits(conversation.essai == .arrete ? .startsMediaSession : [])
         .accessibilityIdentifier("testerMicro")
     }
 

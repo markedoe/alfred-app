@@ -21,8 +21,9 @@ struct ConsoleVue: View {
     @AppStorage("console.environnementMasque") private var environnementMasque = false
     /// Le démarrage de la console (2,4 s), joué une fois par ouverture.
     @State private var debut = Date.now
-    /// La hauteur de la console sans le clavier : la saisie ouverte, le clavier réduit la place, et les jauges ne
-    /// doivent ni disparaître ni faire sauter la roue (revue du 18.10).
+    /// La hauteur de la console sans le clavier, mesurée sur la pile qui l'ignore : elle ne bouge ni quand le clavier
+    /// s'ouvre, ni pendant qu'il se ferme ; les jauges ne disparaissent pas et la roue ne saute pas (revues du 18.10 et
+    /// du 21.10 : mesurée sur la place laissée par le clavier, elle sautait encore à la fermeture).
     @State private var hauteurSansClavier: CGFloat = 0
 
     enum VueConsole: Hashable, CaseIterable {
@@ -55,7 +56,8 @@ struct ConsoleVue: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     BasConsole(
-                        large: large, jauges: (ecrire ? hauteurSansClavier : geo.size.height) >= 640 || large,
+                        large: large,
+                        jauges: (hauteurSansClavier > 0 ? hauteurSansClavier : geo.size.height) >= 640 || large,
                         ecrire: $ecrire,
                         raccourcis: fenetre == nil && !liensOuverts)
                     if !large {
@@ -63,6 +65,11 @@ struct ConsoleVue: View {
                     }
                 }
                 .ignoresSafeArea(.keyboard)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    hauteurSansClavier = $0
+                }
                 if ecrire {
                     // comme la console : la saisie se ferme à l'envoi, et le téléphone montre les échanges
                     SaisieConsole(ouverte: $ecrire) { if !large { vue = .alfred } }
@@ -101,9 +108,6 @@ struct ConsoleVue: View {
                 }
                 // la console reste devinée sous le voile de la fenêtre
                 .presentationBackground(.clear)
-            }
-            .onChange(of: geo.size.height, initial: true) { _, h in
-                if !ecrire { hauteurSansClavier = h }
             }
             .onChange(of: fenetre) { _, f in
                 if f != nil {
@@ -365,9 +369,9 @@ struct BasConsole: View {
                     !conversation.enConversation && conversation.phase == .repos ? .startsMediaSession : []
                 )
                 .accessibilityIdentifier("parler")
+                // jamais grisé, comme la console : dans une conversation, l'écrit en garde le fil (un nom mal compris)
                 Button("Écrire") { ecrire.toggle() }
                     .buttonStyle(StyleConsole())
-                    .disabled(conversation.enConversation)
                     .keyboardShortcut(raccourcis && !ecrire ? KeyboardShortcut("/", modifiers: []) : nil)
                     .accessibilityAddTraits(ecrire ? .isSelected : [])
                     .accessibilityIdentifier("ecrire")
@@ -558,41 +562,27 @@ struct SaisieConsole: View {
     let envoye: () -> Void
     @State private var texte = ""
     @FocusState private var focus: Bool
+    @Environment(\.dynamicTypeSize) private var taille
 
     var body: some View {
-        HStack(spacing: 8) {
-            TextField("Écrire à Alfred…", text: $texte)
-                .font(.callout)
-                .foregroundStyle(Color(.texte))
-                .focused($focus)
-                .submitLabel(.send)
-                .onSubmit(envoyer)
-                .onChange(of: texte) { _, t in
-                    if t.count > Self.longueurMax { texte = String(t.prefix(Self.longueurMax)) }
+        Group {
+            // aux tailles d'accessibilité, « Envoyer » prendrait toute la ligne : le champ seul, les boutons dessous
+            if taille.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    champ
+                    HStack(spacing: 8) {
+                        boutonEnvoyer
+                        Spacer(minLength: 0)
+                        boutonFermer
+                    }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
-                .background(Color(red: 8 / 255, green: 18 / 255, blue: 29 / 255), in: .rect(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.acier), lineWidth: 1.5))
-                .accessibilityLabel("Votre message")
-                .accessibilityIdentifier("saisie")
-            Button("Envoyer", action: envoyer)
-                .buttonStyle(StyleConsole(genre: .principal, hauteur: 44))
-                .fixedSize()
-                .disabled(
-                    texte.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !alfred.estPret
-                        || !conversation.peutEcrire
-                )
-                .accessibilityIdentifier("envoyer")
-            Button {
-                ouverte = false
-            } label: {
-                Image(systemName: "xmark")
+            } else {
+                HStack(spacing: 8) {
+                    champ
+                    boutonEnvoyer
+                    boutonFermer
+                }
             }
-            .buttonStyle(StyleIcone())
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("Fermer la saisie")
         }
         .padding(10)
         .background {
@@ -601,6 +591,47 @@ struct SaisieConsole: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.faisceauSombre), lineWidth: 2))
         .onAppear { focus = true }
+    }
+
+    private var champ: some View {
+        TextField("Écrire à Alfred…", text: $texte)
+            .font(.callout)
+            .foregroundStyle(Color(.texte))
+            .focused($focus)
+            .submitLabel(.send)
+            .onSubmit(envoyer)
+            .onChange(of: texte) { _, t in
+                if t.count > Self.longueurMax { texte = String(t.prefix(Self.longueurMax)) }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .background(Color(red: 8 / 255, green: 18 / 255, blue: 29 / 255), in: .rect(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.acier), lineWidth: 1.5))
+            .accessibilityLabel("Votre message")
+            .accessibilityIdentifier("saisie")
+    }
+
+    private var boutonEnvoyer: some View {
+        Button("Envoyer", action: envoyer)
+            .buttonStyle(StyleConsole(genre: .principal, hauteur: 44))
+            .largeurDuTexte()
+            .disabled(
+                texte.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !alfred.estPret
+                    || !conversation.peutEcrire
+            )
+            .accessibilityIdentifier("envoyer")
+    }
+
+    private var boutonFermer: some View {
+        Button {
+            ouverte = false
+        } label: {
+            Image(systemName: "xmark")
+        }
+        .buttonStyle(StyleIcone())
+        .keyboardShortcut(.cancelAction)
+        .accessibilityLabel("Fermer la saisie")
     }
 
     /// La console : `maxlength="4000"`.
@@ -745,6 +776,8 @@ private struct AvisConsole: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
     @State private var affiche: (id: UUID, texte: String, alerte: Bool)?
+    /// La liaison est tombée (pour annoncer son retour).
+    @State private var liaisonPerdue = false
 
     var body: some View {
         Group {
@@ -785,12 +818,32 @@ private struct AvisConsole: View {
             montrer(a.texte, alerte: a.genre == .attention)
             conversation.oublierAvis(a)
         }
+        // VoiceOver dit la réponse d'une question écrite et l'échec d'une demande (la console : le journal en
+        // `aria-live`), et la liaison qui tombe puis revient (la ligne d'état en `role="status"`)
+        .onChange(of: conversation.annonce) { _, a in
+            if let a { annoncer(a.texte) }
+        }
+        .onChange(of: alfred.estPret) { _, pret in
+            if !pret, case .deconnecte = alfred.liaison {
+                liaisonPerdue = true
+                annoncer("Maison déconnectée · reconnexion automatique")
+            } else if pret, liaisonPerdue {
+                liaisonPerdue = false
+                annoncer("Maison reconnectée")
+            }
+        }
+    }
+
+    /// Jamais micro ouvert (conversation, essai du micro) : le micro entendrait VoiceOver.
+    private func annoncer(_ texte: String) {
+        guard !conversation.enConversation, conversation.essai == .arrete else { return }
+        AccessibilityNotification.Announcement(texte).post()
     }
 
     private func montrer(_ texte: String, alerte: Bool) {
         let id = UUID()
         affiche = (id, texte, alerte)
-        AccessibilityNotification.Announcement(texte).post()
+        annoncer(texte)
         Task {
             try? await Task.sleep(for: .seconds(2.6))
             if affiche?.id == id { affiche = nil }

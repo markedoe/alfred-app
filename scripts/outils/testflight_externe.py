@@ -382,7 +382,11 @@ def soumettre(numero, minutes=45):
             raise
         deja = None
     if deja and deja.get("data"):
-        print(f"examen d'Apple déjà demandé : {deja['data']['attributes'].get('betaReviewState')}")
+        etat = deja["data"]["attributes"].get("betaReviewState")
+        print(f"examen d'Apple déjà demandé : {etat}")
+        if etat == "REJECTED":
+            # l'API ne donne pas le motif : il est dans App Store Connect (et dans l'e-mail d'Apple)
+            sys.exit("examen d'Apple REFUSÉ : le motif est dans App Store Connect › TestFlight ; corriger, puis relancer")
         return
     s = api(
         "POST",

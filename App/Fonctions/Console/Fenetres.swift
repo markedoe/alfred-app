@@ -105,6 +105,7 @@ struct FenetreDocuments: View {
             }
         }
         .onAppear { alfred.annexes?.relireDocuments() }
+        .onDisappear { alfred.annexes?.oublierErreurDepot() }
     }
 
     /// « Pour le » : le jour que le document concerne (facultatif), et la ligne d'état du dépôt.

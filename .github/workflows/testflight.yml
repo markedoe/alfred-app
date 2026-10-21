@@ -30,8 +30,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  integration-verte:
+    name: Intégration verte pour ce commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      # rien ne part à TestFlight sans que la CI (« Intégration ») ait réussi sur ce même commit
+      - name: Dernière « Intégration » du commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" \
+            --jq '.total_count')
+          [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 ]] \
+            || { echo "::error::« Intégration » n'a pas réussi sur ${GITHUB_SHA::7} : TestFlight attend la CI verte"; exit 1; }
+          echo "« Intégration » réussie sur ${GITHUB_SHA::7}"
+
   testflight:
     name: Fabriquer et envoyer
+    needs: integration-verte
     runs-on: macos-26
     timeout-minutes: 60
     env:

@@ -141,6 +141,18 @@ class Soumettre(unittest.TestCase):
         self.assertNotIn("/v1/betaAppReviewSubmissions", [c for m, c, _ in faux.appels if m == "POST"])
         self.assertIn("déjà demandé : APPROVED", sortie)
 
+    def test_examen_refuse_en_rouge(self):
+        with self.assertRaises(SystemExit) as e:
+            self.lancer(
+                {
+                    ("GET", "/v1/builds?"): build(),
+                    ("GET", "/v1/builds/b1/betaAppReviewSubmission"): {
+                        "data": {"attributes": {"betaReviewState": "REJECTED"}}
+                    },
+                }
+            )
+        self.assertIn("REFUSÉ", str(e.exception))
+
     def test_relance_deja_dans_le_groupe(self):
         faux, sortie = self.lancer(
             {

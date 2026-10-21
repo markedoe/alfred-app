@@ -88,6 +88,22 @@ final class VoixSysteme: MoteurVoix {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.servicesRedemarres() }
             })
+        // des écouteurs retirés : Alfred se tait au lieu de continuer sur le haut-parleur (sa réponse peut être privée ;
+        // doc d'Apple, « Responding to audio route changes » : « automatically pause playback when users disconnect
+        // their headphones »). La notification arrive sur un autre fil : la file principale la reçoit.
+        observateurs.append(
+            centre.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) {
+                [weak self] note in
+                let raison = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
+                    .flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+                guard VoixSysteme.seTaire(apres: raison) else { return }
+                MainActor.assumeIsolated { self?.interrompre() }
+            })
+    }
+
+    /// Un appareil de sortie a disparu (écouteurs retirés, AirPods rangés) : Alfred se tait.
+    nonisolated static func seTaire(apres raison: AVAudioSession.RouteChangeReason?) -> Bool {
+        raison == .oldDeviceUnavailable
     }
 
     isolated deinit {
@@ -97,12 +113,31 @@ final class VoixSysteme: MoteurVoix {
     /// Un moteur s'est arrêté avec le matériel. Le notre seulement, et seulement s'il est vraiment arrêté (activer le
     /// traitement de la voix peut aussi annoncer un changement, moteur toujours en marche).
     private func moteurChange(_ id: ObjectIdentifier) {
-        if micOuvert, id == ObjectIdentifier(capture.moteur), !capture.moteur.isRunning {
+        let micro = micOuvert ? (id: ObjectIdentifier(capture.moteur), tourne: capture.moteur.isRunning) : nil
+        let lecteur = (id: ObjectIdentifier(lecteurSeul.moteurAudio), tourne: lecteurSeul.moteurAudio.isRunning)
+        let suite = Self.suite(moteur: id, micro: micro, lecteur: lecteur)
+        switch suite {
+        case .fermerConversation:
             journal.notice("moteur du micro arrêté par un changement de matériel")
-            surInterruption?("Le son a changé de sortie (écouteurs) : touchez le noyau pour reprendre.")
-        } else if id == ObjectIdentifier(lecteurSeul.moteurAudio), !lecteurSeul.moteurAudio.isRunning {
-            interrompre()
+            surInterruption?(Self.motifMateriel)
+        case .taireAlfred: interrompre()
+        case .rien: break
         }
+    }
+
+    enum SuiteChangement: Equatable { case rien, fermerConversation, taireAlfred }
+    static let motifMateriel = "Le son a changé de sortie (écouteurs) : touchez le noyau pour reprendre."
+
+    /// Que faire d'un changement de matériel annoncé pour `moteur` : `micro` (le moteur du micro et s'il tourne) quand
+    /// une conversation est ouverte, `lecteur` (celui de la voix hors conversation). Seul NOTRE moteur compte, et
+    /// seulement s'il s'est vraiment arrêté (activer le traitement de la voix l'annonce aussi, moteur en marche).
+    nonisolated static func suite(
+        moteur: ObjectIdentifier, micro: (id: ObjectIdentifier, tourne: Bool)?,
+        lecteur: (id: ObjectIdentifier, tourne: Bool)
+    ) -> SuiteChangement {
+        if let micro, moteur == micro.id { return micro.tourne ? .rien : .fermerConversation }
+        if moteur == lecteur.id, !lecteur.tourne { return .taireAlfred }
+        return .rien
     }
 
     /// Le service média d'iOS a redémarré (rare ; Réglages › Développeur › « Reset Media Services » le provoque) :
@@ -141,22 +176,37 @@ final class VoixSysteme: MoteurVoix {
         set { reglages.set(newValue, forKey: Self.cleEntree) }
     }
 
-    /// La liste d'iOS (la catégorie « enregistrement » est posée sans activer la session : la musique continue).
+    /// La liste d'iOS (la catégorie « enregistrement » est posée sans activer la session : la musique continue). Jamais
+    /// pendant qu'Alfred parle ou que le micro est ouvert : changer la catégorie d'une session active couperait la
+    /// musique et pourrait arrêter sa voix.
     func entrees() -> [EntreeMicro] {
         let session = AVAudioSession.sharedInstance()
-        if session.category != .playAndRecord {
-            try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        if session.category != .playAndRecord, lecture == nil, clip == nil, !micOuvert {
+            try? session.setCategory(.playAndRecord, mode: .voiceChat, options: Self.optionsMicro)
         }
         return (session.availableInputs ?? []).map { EntreeMicro(uid: $0.uid, nom: $0.portName) }
     }
 
+    /// Le haut-parleur plutôt que l'écouteur de l'iPhone, et les micros Bluetooth.
+    static let optionsMicro: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothHFP]
+
     func ouvrirMicro() throws -> AsyncStream<[Float]> {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        // le micro choisi, s'il est encore là ; sinon celui d'iOS, et le choix périmé est oublié (comme la console)
+        // le mode « voiceChat » : celui que le traitement de la voix (annulation d'écho) pose de lui-même s'il ne l'est
+        // pas (doc d'Apple) ; posé d'avance, il ne change plus à l'ouverture du micro
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: Self.optionsMicro)
+        try session.setActive(true)
+        // le micro choisi, APRÈS l'activation (doc d'Apple de setPreferredInput : « only after setting the audio
+        // session's category and mode and activating the session »), s'il est encore là ; sinon celui d'iOS, et le choix
+        // périmé est oublié (comme la console). Un micro qu'iOS refuse : celui d'iOS pour cette fois, et c'est dit.
         if let uid = entreeChoisie {
             if let port = session.availableInputs?.first(where: { $0.uid == uid }) {
-                try? session.setPreferredInput(port)
+                do {
+                    try session.setPreferredInput(port)
+                } catch {
+                    journal.error("micro choisi refusé par iOS : \(error.localizedDescription, privacy: .public)")
+                    entreeOubliee = true
+                }
             } else {
                 entreeChoisie = nil
                 entreeOubliee = true
@@ -165,7 +215,6 @@ final class VoixSysteme: MoteurVoix {
         } else {
             try? session.setPreferredInput(nil)
         }
-        try session.setActive(true)
         let flux: AsyncStream<[Float]>
         do {
             flux = try capture.demarrer()
@@ -195,7 +244,10 @@ final class VoixSysteme: MoteurVoix {
         interrompre()
         let lecteur = (micOuvert ? lecteurConversation : nil) ?? lecteurSeul
         if !micOuvert {
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            // une réponse lue par synthèse : le mode « voicePrompt », avec les options que la doc d'Apple lui associe
+            // (la musique baisse, un podcast s'interrompt)
+            try? AVAudioSession.sharedInstance().setCategory(
+                .playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
             try? AVAudioSession.sharedInstance().setActive(true)
         }
         let acces = self.acces

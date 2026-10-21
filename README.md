@@ -22,7 +22,10 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
     arguments, fait ou échoué ; jamais le contenu d’un résultat).
   - Les pièces qu’Alfred nomme dans sa réponse bougent sur la roue ; la voix reconnue par la maison s’affiche 8 s.
 - **Écrire à Alfred**
-  - La réponse arrive par écrit. La lecture à voix haute est au choix, dans les réglages.
+  - La réponse arrive par écrit. La lecture à voix haute est au choix, dans les réglages ; avec VoiceOver, une
+    réponse qui n’est pas lue est annoncée.
+  - Pendant une conversation, l’écrit en garde le fil et la conversation : la réponse est lue, puis Alfred réécoute
+    (un nom que le micro comprend mal s’écrit sans tout recommencer).
 - **La maison (la roue)**
   - Un secteur par pièce de la console (nom, température), ambre quand la lumière est allumée. Toucher un secteur
     ouvre la pièce : ses mesures et un seul bouton, Allumer ou Éteindre. Le réacteur suit la commande (crochets,
@@ -96,7 +99,11 @@ swift test --package-path Paquets/AlfredKit
 - les permissions sont minimales ;
 - les outils téléchargés sont vérifiés par leur SHA-256 ;
 - seuls `TestFlight`, `Testeurs externes` et `Certificats` lisent des secrets, à la main ou sur étiquette ; une
-  contribution extérieure n’en reçoit jamais.
+  contribution extérieure n’en reçoit jamais ;
+- `TestFlight` ne part que si `Intégration` a réussi sur le même commit ; sur `main`, aucun run d’`Intégration`
+  n’est annulé, pour que chaque commit ait son verdict ;
+- les journaux sont publics : le nom du titulaire du certificat de signature y est masqué dès sa lecture, comme le
+  contact de l’examen d’Apple et les testeurs.
 
 ## Sécurité
 

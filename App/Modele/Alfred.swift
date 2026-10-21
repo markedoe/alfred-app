@@ -55,6 +55,8 @@ final class Alfred {
 
     @ObservationIgnored private var client: ClientRelais?
     @ObservationIgnored private var acces: AccesURLSession?
+    /// L'accès de la liaison en cours (le relais, la démo, ou celui d'un test) : `/moi` et `/deconnexion`.
+    @ObservationIgnored private var relais: (any AccesRelais)?
     @ObservationIgnored private var abonnement: Task<Void, Never>?
     @ObservationIgnored private var releve: Task<Void, Never>?
     @ObservationIgnored private var minuterieVoix: Task<Void, Never>?
@@ -64,8 +66,16 @@ final class Alfred {
 
     /// L'app sur l'appareil : configuration embarquée ou saisie, session dans le trousseau.
     static func surAppareil() -> Alfred {
-        if ProcessInfo.processInfo.arguments.contains("-demo") { return demonstration() }
-        return Alfred(configuration: ConfigurationMaison.actuelle(), reglages: .standard)
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-demo") { return demonstration() }
+        let a = Alfred(configuration: ConfigurationMaison.actuelle(), reglages: .standard)
+        #if DEBUG
+        // tests d'interface : l'accueil avec le motif d'une déconnexion (« -motifAccueil <texte> »)
+        if let i = arguments.firstIndex(of: "-motifAccueil"), arguments.indices.contains(i + 1) {
+            a.motifAccueil = arguments[i + 1]
+        }
+        #endif
+        return a
     }
 
     /// La démo : une maison simulée, sans réseau ni micro (tests d'interface, aperçus, captures).
@@ -86,9 +96,16 @@ final class Alfred {
         }
     }
 
-    private init(demo: Bool) {
+    /// Une maison donnée, pour les tests : ni configuration, ni trousseau ; la voix donnée (nil : muette).
+    static func essai(acces: any AccesRelais, voix: (any MoteurVoix)? = nil) -> Alfred {
+        let a = Alfred(demo: false, suite: "tests.alfred")
+        a.demarrer(acces: acces, voix: voix)
+        return a
+    }
+
+    private init(demo: Bool, suite: String = "demo") {
         self.demo = demo
-        reglages = UserDefaults(suiteName: "demo") ?? .standard
+        reglages = UserDefaults(suiteName: suite) ?? .standard
         configuration = nil
         conversation = Conversation(voix: VoixMuette(), reglages: reglages)
         etape = .connecte
@@ -137,9 +154,10 @@ final class Alfred {
         demarrer(acces: acces, voix: voix)
     }
 
-    private func demarrer(acces: any AccesRelais, voix: VoixSysteme?) {
+    private func demarrer(acces: any AccesRelais, voix: (any MoteurVoix)?) {
         let client = ClientRelais(acces: acces)
         self.client = client
+        relais = acces
         liaison = .connexion
         let conversation = conversation
         annexes = Annexes(acces: acces) { texte, genre in conversation.aviser(texte, genre) }
@@ -182,10 +200,13 @@ final class Alfred {
 
     /// Se déconnecter : le jeton est supprimé dans HA (route du relais), la session quitte le trousseau.
     func seDeconnecter() async {
+        // plus aucune nouvelle de la maison d'abord : une phrase encore en route ne doit pas reparaître dans la
+        // conversation vidée (iPad partagé : la personne suivante la verrait)
+        arreterAbonnement()
         await conversation.nouvelle()
         var prevenue = true
-        if let acces {
-            let reponse = try? await acces.lire("/deconnexion")
+        if !demo, let relais {
+            let reponse = try? await relais.lire("/deconnexion")
             prevenue = reponse.map { (200..<400).contains($0.statut) } ?? false
         }
         await fermer()
@@ -199,12 +220,16 @@ final class Alfred {
         etape = configuration == nil ? .configuration : .accueil
     }
 
+    private func arreterAbonnement() {
+        abonnement?.cancel()
+        abonnement = nil
+    }
+
     private func fermer() async {
+        arreterAbonnement()
         // le micro se ferme et Alfred se tait ; la voix redevient muette (une démo ouverte ensuite n'a pas de micro)
         await conversation.couper()
         conversation.remplacerVoix(VoixMuette())
-        abonnement?.cancel()
-        abonnement = nil
         releve?.cancel()
         releve = nil
         conversation.arreterEssai()
@@ -221,6 +246,7 @@ final class Alfred {
         conversation.client = nil
         acces?.fermer()
         acces = nil
+        relais = nil
         maison = Maison()
         structure = StructureMaison()
         console = ConsoleMaison()
@@ -245,18 +271,25 @@ final class Alfred {
 
     // MARK: - nouvelles de la maison
 
-    private func traiter(_ n: ClientRelais.Nouvelle, client: ClientRelais, voix: VoixSysteme?) async {
+    private func traiter(_ n: ClientRelais.Nouvelle, client: ClientRelais, voix: (any MoteurVoix)?) async {
         switch n {
         case .etat(let e):
             let etaitPret = estPret
             liaison = e
-            if case .pret = e {
+            switch e {
+            case .pret:
                 moteur = await client.moteurConversation
                 nombreEntites = await client.nombreEntites
                 // hors de la file des nouvelles : /moi et les clips ne retardent ni les états ni les tours
                 Task { [weak self] in await self?.verifierSession(client: client, voix: voix) }
-            } else if etaitPret {
-                await perdreLaMaison()
+            case .synchronisation: break
+            default:
+                if etaitPret {
+                    await perdreLaMaison()
+                } else {
+                    // coupée pendant la synchronisation : les états déjà chargés ne sont plus actuels
+                    effacerLaMaison()
+                }
             }
         case .maisonChargee:
             maison = Self.utile(await client.maison, structure, console)
@@ -301,10 +334,14 @@ final class Alfred {
     /// La liaison est coupée : comme la console, plus rien de la maison n'est montré comme actuel (états, courbe de
     /// puissance, pièces qui bougent) et la conversation se ferme ; tout revient avec la reconnexion.
     private func perdreLaMaison() async {
+        effacerLaMaison()
+        await conversation.couper()
+    }
+
+    private func effacerLaMaison() {
         maison = Maison()
         historiquePuissance = []
         mouvements = [:]
-        await conversation.couper()
     }
 
     private func releverPuissance() {
@@ -316,17 +353,13 @@ final class Alfred {
     /// Le relais accepte une session révoquée en la traitant comme invitée : on vérifie `/moi` à chaque connexion
     /// (3 essais : un échec passager ne doit pas cacher les notifications et les liens jusqu'à la reconnexion), puis
     /// les annexes démarrent. Tout s'arrête si cette liaison a été remplacée entre-temps.
-    private func verifierSession(client: ClientRelais, voix: VoixSysteme?) async {
-        guard let acces else {
-            if demo { moi = Moi(connecte: true, nom: "Démo", userId: nil, titre: "Monsieur") }
-            annexes?.demarrer(connecte: moi?.connecte == true)
-            return
-        }
+    private func verifierSession(client: ClientRelais, voix: (any MoteurVoix)?) async {
+        guard let relais else { return }
         var lu: Moi?
         for essai in 0..<3 {
             if essai > 0 { try? await Task.sleep(for: .seconds(essai)) }
             guard client === self.client else { return }
-            if let (statut, corps) = try? await acces.lire("/moi"), statut == 200,
+            if let (statut, corps) = try? await relais.lire("/moi"), statut == 200,
                 let m = try? JSONDecoder().decode(Moi.self, from: corps)
             {
                 lu = m
@@ -336,7 +369,9 @@ final class Alfred {
         guard client === self.client else { return }
         if let m = lu, !m.connecte {
             motifAccueil = "Votre connexion à la maison a expiré. Reconnectez-vous."
-            // la personne suivante ne doit voir ni la conversation ni le fil de la précédente
+            // la personne suivante ne doit voir ni la conversation ni le fil de la précédente (plus aucune nouvelle
+            // de la maison d'abord : rien ne doit y reparaître)
+            arreterAbonnement()
             await conversation.nouvelle()
             await fermer()
             if let configuration { Trousseau.effacer(compte: configuration.relais.hote) }
@@ -346,7 +381,7 @@ final class Alfred {
         let titreChange = lu != nil && moi?.titre != lu?.titre
         if let m = lu { moi = m }
         annexes?.demarrer(connecte: moi?.connecte == true)
-        if titreChange { await voix?.chargerClips(titre: moi?.titre) }
+        if titreChange { await (voix as? VoixSysteme)?.chargerClips(titre: moi?.titre) }
     }
 
     // MARK: - mode invités, voix, pièces citées

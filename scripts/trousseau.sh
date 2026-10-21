@@ -21,6 +21,12 @@ p12="$RUNNER_TEMP/signature.p12"
 mot_de_passe=$(openssl rand -base64 24)
 
 printf '%s' "$SIGNATURE_P12_B64" | base64 --decode > "$p12"
+# le nom du titulaire, écrit dans le certificat, ne doit jamais paraître dans un journal public : Xcode le cite quand la
+# signature échoue. Masqué ici pour toutes les étapes suivantes du travail (le nom complet, l'organisation, chaque mot du
+# nom) ; rien n'est affiché que leur nombre
+sujet=$(openssl pkcs12 -in "$p12" -passin env:SIGNATURE_P12_MOT_DE_PASSE -nokeys -clcerts 2>/dev/null \
+    | openssl x509 -noout -subject 2>/dev/null || true)
+SUJET="$sujet" python3 "$(dirname "$0")/outils/masques_certificat.py"
 # un mois avant la fin du certificat (un an de validité), la fabrication le signale sans échouer
 if ! openssl pkcs12 -in "$p12" -passin env:SIGNATURE_P12_MOT_DE_PASSE -nokeys -clcerts 2>/dev/null \
     | openssl x509 -noout -checkend 2592000 > /dev/null; then

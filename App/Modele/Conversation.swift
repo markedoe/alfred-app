@@ -15,7 +15,9 @@ import Observation
 ///   aussi (décision du 06.10 : les liens entre demandes ne valent que dans la même session ; la console :
 ///   `session.convId`) ;
 /// - **pendant une réponse** (la console : `voiceAction`, `talk`) : toucher le noyau fait taire Alfred ; une question
-///   écrite le fait taire et part, une fois son tour fini ; pendant la réflexion, rien ne part (le texte reste).
+///   écrite le fait taire et part, une fois son tour fini ; pendant la réflexion, rien ne part (le texte reste) ;
+/// - **l'écrit dans une conversation** (la console : `talk`, décision du 21.10) : la question garde le fil ET la
+///   conversation ; sa réponse est lue, puis Alfred réécoute.
 @Observable @MainActor
 final class Conversation {
     enum Phase: Hashable, Sendable {
@@ -62,6 +64,12 @@ final class Conversation {
         let genre: Genre
     }
 
+    /// Ce que VoiceOver doit dire (la console : le journal des échanges en `aria-live`).
+    struct Annonce: Identifiable, Equatable, Sendable {
+        let id = UUID()
+        let texte: String
+    }
+
     static let silenceMaximal: Duration = .seconds(90)
     static let margeApresReponse = 16_000  // échantillons : 1 s à 16 kHz
     static let cleLireEcrit = "voix.lireReponsesEcrites"
@@ -71,6 +79,11 @@ final class Conversation {
     /// Le micro est ouvert (conversation continue).
     private(set) var enConversation = false
     private(set) var avis: Avis?
+    /// La réponse à une question écrite qui n'est pas lue à voix haute, ou l'échec d'une demande : VoiceOver la dit.
+    /// Jamais micro ouvert (le micro entendrait VoiceOver).
+    private(set) var annonce: Annonce?
+    /// Une question écrite part (observé : « Envoyer » attend ; ni le micro ni un 2e envoi ne partent entre-temps).
+    private(set) var envoiEnCours = false
     /// Nombre de tours de voix réussis (retour haptique « succès »).
     private(set) var reponses = 0
     /// La durée de la dernière réponse (la console : « Dernière réponse », dans Réglages & état).
@@ -105,6 +118,8 @@ final class Conversation {
     @ObservationIgnored private var margeRestante = 0
     @ObservationIgnored private var tourVocal = false
     @ObservationIgnored private var voixEnCours = false
+    /// La lecture en cours : une lecture coupée qui finit après le début de la suivante ne clôt pas le tour de celle-ci.
+    @ObservationIgnored private var lectureEnCours = UUID()
     /// Le tour de la maison est fini (observé : pendant la voix d'Alfred, l'écrit attend cette fin).
     private var finRecue = false
     @ObservationIgnored private var messageAlfred: UUID?
@@ -202,7 +217,7 @@ final class Conversation {
 
     /// Un paquet du micro (dans l'ordre, une seule tâche).
     func entendre(_ echantillons: [Float]) async {
-        guard enConversation, phase == .ecoute, let client else {
+        guard enConversation, phase == .ecoute, !envoiEnCours, let client else {
             niveauMicro = 0
             return
         }
@@ -377,6 +392,7 @@ final class Conversation {
     /// Une question écrite peut partir (la console : `talk`, `#send-text`) : au repos, au micro avant toute phrase, ou
     /// pendant la voix d'Alfred une fois son tour fini (elle le fait taire) ; jamais pendant la réflexion.
     var peutEcrire: Bool {
+        if envoiEnCours { return false }
         switch phase {
         case .repos: true
         case .ecoute: !tourOuvert
@@ -386,25 +402,33 @@ final class Conversation {
     }
 
     /// Une question écrite : true si elle est partie (sinon, le texte reste à qui l'a écrit). Dans une conversation,
-    /// elle en garde le fil et la ferme ; hors conversation, elle part d'un fil neuf.
+    /// elle en garde le fil, la conversation reste ouverte, sa réponse est lue et Alfred réécoute ensuite (la console :
+    /// `talk`) ; hors conversation, elle part d'un fil neuf. Rien ne change avant que la maison l'ait acceptée : un
+    /// refus ne fait pas taire Alfred, ne ferme rien, et le texte reste.
     @discardableResult
     func ecrire(_ texte: String) async -> Bool {
         let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, peutEcrire else { return false }
-        let fil = enConversation ? conversationId : nil
-        if enConversation { await terminer() } else if phase == .reponse { interrompreReponse() }
         guard let client else {
             aviser("La maison n’est pas jointe pour l’instant.", .attention)
             return false
         }
+        envoiEnCours = true
+        defer { envoiEnCours = false }
+        let fil = enConversation ? conversationId : nil
+        minuterieSilence?.cancel()
         guard await client.ecrire(t, conversation: fil) else {
+            if enConversation, phase == .ecoute { armerSilence() }
             await aviserRefus(client)
             return false
         }
+        // Alfred qui lisait la réponse précédente (son tour est fini) se tait ; la question part
+        if phase == .reponse { interrompreReponse() }
         messages.append(Message(id: UUID(), auteur: .moi, texte: t, date: .now))
         conversationId = fil
-        tourVocal = false
+        tourVocal = enConversation
         finRecue = false
+        niveauMicro = 0
         phase = .reflexion
         commencerReponse()
         return true
@@ -436,7 +460,9 @@ final class Conversation {
         switch signal {
         case .transcrit(let texte):
             messages.append(Message(id: UUID(), auteur: .moi, texte: texte, date: .now))
-            if DemandeLente.estLente(texte) { voix.accueillir() }
+            // le « Bien, Monsieur » d'une demande lente : seulement micro ouvert (une conversation fermée pendant la
+            // réflexion n'a plus de session audio active, et le clip couperait la musique)
+            if enConversation, DemandeLente.estLente(texte) { voix.accueillir() }
         case .reflechit:
             phase = .reflexion
             commencerReponse()
@@ -461,13 +487,20 @@ final class Conversation {
                 derniereDuree = $0.duree
             }
             reponses += 1
+            // une réponse écrite qui ne sera pas lue à voix haute : VoiceOver la dit
+            if !tourVocal, !lireReponsesEcrites {
+                annoncer(messages.first { $0.id == messageAlfred }?.texte ?? fin.texte)
+            }
         case .voix(let chemin):
             guard tourVocal || lireReponsesEcrites else { return }
             voixEnCours = true
             phase = .reponse
+            let id = UUID()
+            lectureEnCours = id
             lecture = Task { [weak self] in
                 guard let self else { return }
                 await self.voix.lire(chemin)
+                guard self.lectureEnCours == id else { return }
                 self.voixFinie()
             }
         case .rienSaisi:
@@ -487,8 +520,14 @@ final class Conversation {
                 $0.erreur = true
             }
             messageAlfred = nil
+            // le tour est clos par la maison (coupure, refus, délai) : aucune phrase n'est plus en cours d'envoi. Sans
+            // ça, la fermeture qui suit croyait la phrase encore en vol et remettait la réflexion, pour toujours (21.10)
+            tourOuvert = false
             phase = .repos
-            Task { await self.terminer() }
+            Task {
+                await self.terminer()
+                self.annoncer(message)
+            }
         case .termine(let conversation, _):
             if let conversation { conversationId = conversation }
             finRecue = true
@@ -532,6 +571,11 @@ final class Conversation {
 
     func aviser(_ texte: String, _ genre: Avis.Genre) {
         avis = Avis(texte: texte, genre: genre)
+    }
+
+    private func annoncer(_ texte: String) {
+        guard !enConversation, essai == .arrete, !texte.isEmpty else { return }
+        annonce = Annonce(texte: texte)
     }
 
     func oublierAvis(_ a: Avis) {

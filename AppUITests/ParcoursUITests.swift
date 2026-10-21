@@ -60,12 +60,11 @@ final class ParcoursUITests: XCTestCase {
         attendrePret(app)
         capturer(app, "1-pieces")
         bouton(app, "ecrire").tap()
-        let saisie = app.textFields["saisie"].firstMatch.exists ? app.textFields["saisie"] : app.textViews["saisie"]
+        let saisie = app.textFields["saisie"]
         XCTAssertTrue(saisie.waitForExistence(timeout: 5))
         saisie.tap()
-        saisie.typeText("Allume la cuisine")
-        // par l'identifiant seul : la touche « envoyer » du clavier français porte le même libellé
-        bouton(app, "envoyer").tap()
+        // la touche « envoyer » du clavier envoie (revue du 18.10, point 16)
+        saisie.typeText("Allume la cuisine\n")
         // comme la console : l'envoi ferme la saisie et montre les échanges
         XCTAssertTrue(app.staticTexts["briefing"].waitForExistence(timeout: 5))
         XCTAssertTrue(
@@ -80,6 +79,43 @@ final class ParcoursUITests: XCTestCase {
         vue(app, "environnement")
         XCTAssertTrue(element(app, contenant: "Extérieur").waitForExistence(timeout: 5))
         capturer(app, "3-environnement")
+    }
+
+    /// Le clavier s'ouvre puis se ferme : la roue ne bouge pas (les jauges ne dépendent pas de la hauteur que le
+    /// clavier laisse ; revue du 18.10, point 12).
+    func testClavierSansSaut() throws {
+        let app = lancer()
+        attendrePret(app)
+        let atelier = bouton(app, "piece-Atelier")
+        XCTAssertTrue(atelier.waitForExistence(timeout: 10))
+        let avant = atelier.frame
+        bouton(app, "ecrire").tap()
+        XCTAssertTrue(app.textFields["saisie"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "le clavier ne s'ouvre pas")
+        XCTAssertEqual(atelier.frame.minY, avant.minY, accuracy: 1, "la roue saute à l'ouverture du clavier")
+        app.buttons["Fermer la saisie"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(atelier.frame.minY, avant.minY, accuracy: 1, "la roue saute à la fermeture du clavier")
+    }
+
+    /// Échap (clavier de l'iPad, Mac) ferme, comme la console : la saisie, puis la pièce (revue du 18.10, point 13).
+    func testEchap() throws {
+        let app = lancer()
+        attendrePret(app)
+        let atelier = bouton(app, "piece-Atelier")
+        XCTAssertTrue(atelier.waitForExistence(timeout: 10))
+        atelier.tap()
+        XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
+        bouton(app, "ecrire").tap()
+        XCTAssertTrue(app.textFields["saisie"].waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        // sans clavier matériel relié au simulateur, la touche n'arrive pas : ce n'est pas l'app qui est en faute
+        if !app.textFields["saisie"].waitForNonExistence(timeout: 3) {
+            throw XCTSkip("Échap : la touche n'arrive pas à l'app sur ce simulateur (pas de clavier matériel)")
+        }
+        XCTAssertTrue(bouton(app, "actionPiece").exists, "la pièce reste ouverte")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(bouton(app, "actionPiece").waitForNonExistence(timeout: 5), "Échap : puis la pièce")
     }
 
     func testAllumerUnePiece() throws {
@@ -123,6 +159,11 @@ final class ParcoursUITests: XCTestCase {
         documents.tap()
         XCTAssertTrue(element(app, contenant: "Facture d’exemple").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, contenant: "Déposer un document").exists)
+        // « Supprimer » se touche sur 44 pt au moins, pas seulement sur son texte (revue du 18.10, point 15)
+        let supprimer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Supprimer ")).firstMatch
+        XCTAssertTrue(supprimer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(supprimer.frame.height, 44, "cible de « Supprimer »")
+        XCTAssertGreaterThanOrEqual(supprimer.frame.width, 44, "cible de « Supprimer »")
         capturer(app, "6-documents")
         fermer.tap()
 
@@ -235,7 +276,21 @@ final class ParcoursUITests: XCTestCase {
             capturer(app, nom)
             horsEcran(app, nom)
         }
-        if captures { capturerEtVerifier("grand-texte-1-pieces") }
+        if captures {
+            capturerEtVerifier("grand-texte-1-pieces")
+            // la carte d'une pièce : elle défile au lieu de passer sous l'en-tête (revue du 18.10, point 17)
+            bouton(app, "piece-Atelier").tap()
+            XCTAssertTrue(app.descendants(matching: .any)["cartePiece"].waitForExistence(timeout: 5))
+            capturerEtVerifier("grand-texte-1b-carte-piece")
+            app.buttons["Fermer la pièce"].firstMatch.tap()
+            // la saisie : le champ sur sa ligne, assez large pour lire ce qu'on écrit (revue du 21.10, ATTENTION 10)
+            bouton(app, "ecrire").tap()
+            let saisie = app.textFields["saisie"]
+            XCTAssertTrue(saisie.waitForExistence(timeout: 5))
+            XCTAssertGreaterThan(saisie.frame.width, app.frame.width * 0.6, "le champ de saisie est écrasé")
+            capturerEtVerifier("grand-texte-1c-saisie")
+            app.buttons["Fermer la saisie"].tap()
+        }
         vue(app, "alfred")
         let briefing = app.staticTexts["briefing"]
         XCTAssertTrue(briefing.waitForExistence(timeout: 5))
@@ -288,6 +343,39 @@ final class ParcoursUITests: XCTestCase {
         XCTAssert(
             fautes.isEmpty, "\(ecran) : sort de l'écran (\(Int(largeur)) pt) : " + fautes.joined(separator: " ; "))
     }
+
+    /// L'accueil (sans la démo) : le motif d'une déconnexion se voit sans défiler, sous la marque, et rien ne sort de
+    /// l'écran, à la taille normale comme en très grand texte (revue du 18.10, point 18 ; du 21.10, ATTENTION 9).
+    func testAccueil() throws {
+        for taille in [nil, "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "-AppleLanguages", "(fr)", "-AppleLocale", "fr_CH", "-sansAnimations", "-motifAccueil",
+                Self.motifExpire,
+            ]
+            if let taille { app.launchArguments += ["-UIPreferredContentSizeCategoryName", taille] }
+            app.launch()
+            // une fabrication sans configuration demande d'abord l'adresse du relais (gardée ensuite)
+            let adresse = app.textFields["adresseRelais"]
+            if adresse.waitForExistence(timeout: 5) {
+                adresse.tap()
+                adresse.typeText("relais.maison.example\n")
+            }
+            let motif = app.staticTexts["motifAccueil"]
+            XCTAssertTrue(motif.waitForExistence(timeout: 10))
+            XCTAssertTrue(motif.isHittable, "le motif est caché")
+            if taille == nil {
+                let connexion = bouton(app, "seConnecter")
+                XCTAssertTrue(connexion.exists)
+                XCTAssertLessThan(motif.frame.maxY, connexion.frame.minY, "le motif passe sous la connexion")
+            }
+            capturer(app, taille == nil ? "11-accueil" : "grand-texte-8-accueil")
+            horsEcran(app, taille == nil ? "accueil" : "accueil (très grand texte)")
+            app.terminate()
+        }
+    }
+
+    private static let motifExpire = "Votre connexion à la maison a expiré. Reconnectez-vous."
 
     /// Un élément coupé par le bord d'une zone qui défile (en partie dans la vue, en partie dessous).
     private static func enPartieCache(_ e: XCUIElement, dans app: XCUIApplication) -> Bool {

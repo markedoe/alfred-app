@@ -11,9 +11,10 @@ on:
 permissions:
   contents: read
 
+# une demande de fusion remplacée s'annule ; sur main, chaque commit garde son verdict (TestFlight l'exige)
 concurrency:
   group: integration-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   XCODEGEN_VERSION: 2.46.0
@@ -139,7 +140,10 @@ jobs:
         run: scripts/generer.sh
       - name: Simulateur
         id: simulateur
-        run: echo "udid=$(scripts/simulateur.sh)" >> "$GITHUB_OUTPUT"
+        # en deux temps : dans « echo », un échec du script passerait inaperçu (l'étape réussirait, sans simulateur)
+        run: |
+          udid=$(scripts/simulateur.sh)
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: Fabrication et tests (unitaires, interface, audit d'accessibilité)
         run: |
           set -o pipefail
