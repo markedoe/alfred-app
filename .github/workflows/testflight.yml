@@ -6,6 +6,7 @@
 # les profils sont gérés par Xcode. « envoyer » décoché : archive et export signés, sans envoi (vérifier la signature).
 # « externe » (coché par défaut, et toujours sur une étiquette) : une fois envoyée, la fabrication part aussi au groupe
 # des testeurs externes, après l'examen d'Apple (workflow « Testeurs externes », action « soumettre »).
+# Rien ne part sans « Intégration » réussie sur le même commit (job « integration-verte »).
 name: TestFlight
 
 on:

@@ -56,8 +56,8 @@ final class AccesURLSession: NSObject, AccesRelais, URLSessionDelegate, @uncheck
         return ((reponse as? HTTPURLResponse)?.statusCode ?? 0, corps)
     }
 
-    /// POST ou DELETE (documents, notifications), avec l'origine du relais comme la console (le relais refuse une
-    /// écriture venue d'une autre page).
+    /// POST ou DELETE (documents, notifications), avec l'origine du relais, comme la console (contrat du relais :
+    /// `docs/contrat-relais.md`).
     func envoyer(_ r: RequeteRelais) async throws -> (statut: Int, corps: Data) {
         var requete = URLRequest(url: relais.url(r.chemin))
         requete.httpMethod = r.methode.rawValue

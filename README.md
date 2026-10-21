@@ -43,7 +43,8 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
     la lecture des réponses écrites et les engagements de confidentialité.
 - **Mode invités** : quand la maison le demande, l’historique, le résumé, les documents et les notifications sont
   masqués.
-- **Avec un clavier** (iPad, Mac) : espace pour parler, / pour écrire. En disposition large, une poignée masque ou
+- **Avec un clavier** (iPad, Mac) : espace pour parler, / pour écrire ; Échap ferme, dans l’ordre de la console, la
+  liste des autres systèmes, la saisie, la pièce, puis la conversation. En disposition large, une poignée masque ou
   rend chaque panneau de côté.
 
 ## Architecture
@@ -54,7 +55,7 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
 | `App/` | L’app SwiftUI (iOS 26, iPhone et iPad, Mac à puce Apple) : la console en natif (`App/Design`, `App/Fonctions/Console`), son (capture, voix en continu), sécurité (trousseau, épinglage TLS). |
 | `App/Demo` | Une maison de démonstration (sans réseau ni micro), pour les tests d’interface, les aperçus et les captures. |
 | `project.yml` | Le projet Xcode, généré par [XcodeGen](https://github.com/yonaskolb/XcodeGen). Le `.xcodeproj` n’est jamais versionné. |
-| `docs/` | Le contrat du relais, la sécurité. |
+| `docs/` | Le contrat du relais (la sécurité : [`SECURITY.md`](SECURITY.md)). |
 
 Les règles du pipeline (fin de parole décidée par le client, trame binaire de fin, événements périmés ignorés, délai
 de 90 s sans renvoi d’une action…) viennent de la console d’Alfred, où elles ont été mesurées. Elles sont reprises
@@ -88,7 +89,7 @@ swift test --package-path Paquets/AlfredKit
 
 | Workflow | Quand | Quoi |
 |---|---|---|
-| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
+| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; tests des outils Python (App Store Connect simulé, masques des journaux, icône à jour) ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift, des workflows et des outils Python |
 | `TestFlight` | À la main, ou sur une étiquette `v*` | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes, puis aux testeurs externes après l’examen d’Apple (« externe », coché par défaut) ; à la main, « envoyer » décoché : archive et export signés seulement |
 | `Testeurs externes` | À la main, ou appelé par `TestFlight` | Groupe externe sans lien public, informations de test et contact de l’examen d’Apple, envoi d’une fabrication à l’examen, invitations ; aucune donnée personnelle dans le journal (secrets masqués champ par champ) |
