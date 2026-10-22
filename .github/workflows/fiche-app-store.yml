@@ -6,6 +6,8 @@
 #             images partent avec la version, quand elle est soumise.
 #   icones    lecture seule : l'icône qu'App Store Connect a extraite de chaque fabrication récente, et la fabrication
 #             rattachée à chaque version
+#   rattacher la fabrication `fabrication` (son numéro) devient celle de la version modifiable, avec son icône ; rien
+#             n'est soumis, une autre fabrication peut la remplacer
 # Le journal est public : seulement des identifiants techniques, des états et des dimensions.
 name: Fiche App Store
 
@@ -13,10 +15,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "etat, icones ou deposer"
+        description: "etat, icones, rattacher ou deposer"
         type: choice
-        options: [etat, icones, deposer]
+        options: [etat, icones, rattacher, deposer]
         default: etat
+      fabrication:
+        description: "rattacher : le numéro de la fabrication (par exemple 15)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -41,6 +47,7 @@ jobs:
       - name: App Store Connect
         env:
           ACTION: ${{ inputs.action }}
+          FABRICATION: ${{ inputs.fabrication }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
           ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
         run: |
@@ -49,6 +56,10 @@ jobs:
           case "$ACTION" in
             etat) python3 "$outil" etat ;;
             icones) python3 "$outil" icones ;;
+            rattacher)
+              [[ "$FABRICATION" =~ ^[0-9]+$ ]] || { echo "::error::rattacher : numéro de fabrication attendu"; exit 1; }
+              python3 "$outil" rattacher "$FABRICATION"
+              python3 "$outil" icones ;;
             deposer)
               python3 "$outil" deposer --entete AppStore/entete.png --recherche AppStore/recherche.png
               python3 "$outil" etat ;;

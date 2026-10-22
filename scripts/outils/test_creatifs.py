@@ -209,12 +209,39 @@ class Icones(unittest.TestCase):
                 mock.patch.object(creatifs, "appli", lambda: {"id": "app1", "attributes": {}}), redirect_stdout(sortie):
             creatifs.icones()
         texte = sortie.getvalue()
-        self.assertIn("fabrication 2 (2026-01-02T01:00, VALID) : icône AUCUNE ; icônes extraites : AUCUNE", texte)
-        self.assertIn("fabrication 1 (2026-01-01T01:00, VALID) : icône 1024×1024 ; icônes extraites : "
+        self.assertIn("fabrication 2 (2026-01-02T01:00:00Z, VALID) : icône AUCUNE ; icônes extraites : AUCUNE", texte)
+        self.assertIn("fabrication 1 (2026-01-01T01:00:00Z, VALID) : icône 1024×1024 ; icônes extraites : "
                       "APP_STORE 1024×1024 (verre)", texte)
         self.assertIn("version 1.0 (PREPARE_FOR_SUBMISSION) : fabrication rattachée 1", texte)
         self.assertNotIn("exemple.invalid", texte)           # journal public : jamais l'adresse d'une image
         self.assertFalse([a for a in appels if a[0] != "GET"])
+
+
+class Rattacher(unittest.TestCase):
+    VERSION = [{"id": "v1", "attributes": {"versionString": "1.0", "appVersionState": "PREPARE_FOR_SUBMISSION"}}]
+
+    def lancer(self, attributs):
+        appels = []
+
+        def faux_api(methode, chemin, corps=None):
+            appels.append((methode, chemin, corps))
+
+        with mock.patch.object(creatifs, "api", faux_api), mock.patch.object(creatifs, "lister", lambda c: self.VERSION), \
+                mock.patch.object(creatifs, "appli", lambda: {"id": "app1", "attributes": {}}), \
+                mock.patch.object(creatifs, "fabrication", lambda app, n: ({"id": "b15", "attributes": attributs}, [])), \
+                redirect_stdout(io.StringIO()):
+            creatifs.rattacher("15")
+        return appels
+
+    def test_rattache_la_fabrication_a_la_version_modifiable_sans_soumettre(self):
+        appels = self.lancer({"version": "15", "processingState": "VALID", "expired": False})
+        self.assertEqual(appels, [("PATCH", "/v1/appStoreVersions/v1/relationships/build",
+                                   {"data": {"type": "builds", "id": "b15"}})])
+
+    def test_refuse_une_fabrication_non_traitee_ou_expiree(self):
+        for attributs in ({"processingState": "PROCESSING"}, {"processingState": "VALID", "expired": True}):
+            with self.assertRaises(SystemExit):
+                self.lancer(attributs)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@
     creatifs.py icones                      lecture seule : l'icône qu'App Store Connect a extraite de chaque fabrication
                                             récente (types et dimensions, « Build Icons ») et la fabrication rattachée
                                             à chaque version
+    creatifs.py rattacher NUMÉRO            rattache cette fabrication à la version modifiable (son icône devient
+                                            celle de la version) ; rien n'est soumis
 
 Bibliothèque d'éléments de l'app (App Asset Library, API App Store Connect 4.5.1, documentation d'Apple :
 « Placing assets on your App Store surfaces ») : une image est réservée, envoyée, validée, traitée, puis placée sur une
@@ -26,7 +28,7 @@ import sys
 import time
 import urllib.request
 
-from testflight_externe import ErreurASC, api, appli, lister, requete_url
+from testflight_externe import ErreurASC, api, appli, fabrication, lister, requete_url
 
 TYPES = {"entete": "PRODUCT_PAGE_HEADER_ASSET", "recherche": "APP_STORE_SEARCH_RESULTS_ASSET"}
 CATEGORIE = "CREATIVE_ASSETS"
@@ -225,7 +227,8 @@ def icones(nombre=5):
         except ErreurASC as e:
             extraites = f"illisibles ({e})"
         jeton = a.get("iconAssetToken")
-        print(f"fabrication {a.get('version')} ({(a.get('uploadedDate') or '?')[:16]}, {a.get('processingState')}) : "
+        # l'heure telle qu'Apple la rend, AVEC son décalage (heure du Pacifique : 16 h 26 -07:00 = 01 h 26 en Suisse)
+        print(f"fabrication {a.get('version')} ({a.get('uploadedDate') or '?'}, {a.get('processingState')}) : "
               f"icône {_dimensions(jeton) if jeton else 'AUCUNE'} ; icônes extraites : {extraites}")
     for v in versions(app["id"]):
         try:
@@ -234,6 +237,20 @@ def icones(nombre=5):
         except ErreurASC as e:
             numero = f"illisible ({e})"
         print(f"version {v['attributes'].get('versionString')} ({etat_version(v)}) : fabrication rattachée {numero}")
+
+
+def rattacher(numero):
+    """Rattache la fabrication `numero` (traitée, non expirée) à la version modifiable : App Store Connect montre
+    l'icône de cette fabrication pour la version. RIEN n'est envoyé à l'examen ; une autre fabrication la remplace."""
+    app = appli()
+    v = modifiable(app["id"])
+    b, _ = fabrication(app["id"], numero)
+    a = b["attributes"]
+    if a.get("processingState") != "VALID" or a.get("expired"):
+        sys.exit(f"fabrication {numero} : {a.get('processingState')}{', expirée' if a.get('expired') else ''} "
+                 "(il faut une fabrication traitée, non expirée)")
+    api("PATCH", f"/v1/appStoreVersions/{v['id']}/relationships/build", {"data": {"type": "builds", "id": b["id"]}})
+    print(f"version {v['attributes'].get('versionString')} : fabrication {numero} rattachée (rien n'est soumis)")
 
 
 # MARK: - deposer
@@ -309,6 +326,10 @@ def main(argv):
         etat()
     elif argv[:1] == ["icones"]:
         icones()
+    elif argv[:1] == ["rattacher"]:
+        if len(argv) != 2 or not argv[1].isdigit():
+            sys.exit("rattacher NUMÉRO (le numéro de la fabrication, par exemple 15)")
+        rattacher(argv[1])
     elif argv[:1] == ["deposer"]:
         fichiers, reste = {}, argv[1:]
         while reste:
