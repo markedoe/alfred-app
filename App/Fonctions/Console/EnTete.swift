@@ -287,12 +287,16 @@ private struct Compteur: View {
     var pastille = false
     @ScaledMetric(relativeTo: .caption2) private var taillePastille: CGFloat = 10
 
+    private var police: Font {
+        if pastille {
+            return .system(size: taillePastille, weight: .bold, design: .monospaced)
+        }
+        return .caption2.weight(.bold).monospaced()
+    }
+
     var body: some View {
         Text("\(nombre)")
-            .font(
-                pastille
-                    ? .system(size: taillePastille, weight: .bold, design: .monospaced)
-                    : .caption2.weight(.bold).monospaced())
+            .font(police)
             .foregroundStyle(texte)
             .padding(.horizontal, pastille ? 4 : 6)
             .frame(minWidth: pastille ? 15 : 20, minHeight: pastille ? 15 : 20)
