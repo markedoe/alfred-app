@@ -11,10 +11,13 @@ on:
 permissions:
   contents: read
 
-# une demande de fusion remplacée s'annule ; sur main, chaque commit garde son verdict (TestFlight l'exige)
+# une exécution remplacée par un envoi plus récent s'annule, sur main aussi (22.10) : TestFlight ne fabrique que le
+# dernier commit vérifié, et « changements.py » compare toujours à la dernière Intégration RÉUSSIE (jamais au commit
+# précédent). Une étiquette v* doit donc viser un commit dont l'Intégration a réussi ; sinon, lancer « Intégration » à
+# la main sur l'étiquette.
 concurrency:
   group: integration-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 env:
   XCODEGEN_VERSION: 2.46.0
@@ -23,6 +26,52 @@ env:
   GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
 
 jobs:
+  changements:
+    name: L'app a-t-elle changé ?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      app: ${{ steps.app.outputs.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # sur un envoi sur main : la comparaison se fait avec la dernière Intégration RÉUSSIE ; sans base certaine (demande
+      # de fusion, lancement à la main, étiquette, API muette), tout tourne
+      - name: Depuis la dernière Intégration réussie
+        id: app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/outils/changements.py ci
+
+  style:
+    name: Style (swift-format) et tailles de texte
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # la même version que celle du poste de développement (crochet avant chaque commit) : mêmes refus que le Mac,
+    # vérifié le 22.10 sur deux commits refusés
+    container: swift:6.4.1-noble@sha256:19cbe56bdaec1918f7cf5fdeba42b9bd55bdd8a6149c9990d0e0e3a89a127d63
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Style (swift-format)
+        run: |
+          swift-format --version
+          swift-format lint --strict --recursive \
+            App AppTests AppUITests Paquets/AlfredKit/Sources Paquets/AlfredKit/Tests Paquets/AlfredKit/Package.swift
+      - name: Aucune taille de texte figée
+        # les textes suivent la taille choisie (Dynamic Type) : une taille ne s'écrit qu'à partir d'une mesure
+        # (@ScaledMetric) ou de la géométrie d'un dessin, jamais en chiffres
+        run: |
+          if grep -rnE '\.system\(size: *[0-9]' App; then
+            echo "::error::taille de texte figée (utiliser un style de texte ou @ScaledMetric)"; exit 1
+          fi
+
   secrets:
     name: Aucun secret (gitleaks)
     runs-on: ubuntu-24.04
@@ -53,6 +102,8 @@ jobs:
 
   icone:
     name: Icône (compilée et rendue par les outils d'Apple)
+    needs: changements
+    if: needs.changements.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 10
     env:
@@ -106,10 +157,37 @@ jobs:
       - name: Tests
         run: swift test --package-path Paquets/AlfredKit --parallel
 
+  # trois Mac en parallèle (22.10 ; avant : à la suite sur un seul, ≈ 22 min) ; « fail-fast: false » : un simulateur lent
+  # sur l'iPad n'annule pas les tests de l'iPhone. Chaque série se relance seule.
   ios:
-    name: App iOS (fabrication, tests, accessibilité)
+    name: App iOS — ${{ matrix.titre }}
+    needs: [changements, style]
+    if: needs.changements.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nom: iphone
+            titre: iPhone (fabrication, tests, accessibilité)
+            simulateur: iphone
+            tests: ""
+            largeur: ""
+            resultats: Resultats
+          - nom: ipad
+            titre: iPad, disposition large
+            simulateur: ipad
+            tests: AlfredUITests/ParcoursUITests/testDispositionLarge
+            largeur: ""
+            resultats: ResultatsIPad
+          # 390 pt : le plus étroit des iPhone visés (iPhone 12 à 14, 16e) ; le test échoue sur un écran plus large
+          - nom: etroit
+            titre: iPhone le plus étroit (en-tête)
+            simulateur: etroit
+            tests: AlfredUITests/ParcoursUITests/testEnTete
+            largeur: "390"
+            resultats: ResultatsEtroit
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
@@ -123,88 +201,67 @@ jobs:
           echo "${XCODEGEN_SHA256}  xcodegen.zip" | shasum -a 256 -c -
           unzip -q xcodegen.zip -d "$RUNNER_TEMP/xcodegen"
           echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
-      - name: Style (swift-format)
-        run: |
-          xcrun swift-format lint --strict --recursive \
-            App AppTests AppUITests Paquets/AlfredKit/Sources Paquets/AlfredKit/Tests Paquets/AlfredKit/Package.swift
-      - name: Aucune taille de texte figée
-        # les textes suivent la taille choisie (Dynamic Type) : une taille ne s'écrit qu'à partir d'une mesure
-        # (@ScaledMetric) ou de la géométrie d'un dessin, jamais en chiffres
-        run: |
-          if grep -rnE '\.system\(size: *[0-9]' App; then
-            echo "::error::taille de texte figée (utiliser un style de texte ou @ScaledMetric)"; exit 1
-          fi
       - name: AlfredKit (macOS)
+        if: matrix.nom == 'iphone'
         run: swift test --package-path Paquets/AlfredKit --parallel
       - name: Projet (XcodeGen)
         run: scripts/generer.sh
       - name: Simulateur
         id: simulateur
         # en deux temps : dans « echo », un échec du script passerait inaperçu (l'étape réussirait, sans simulateur)
+        env:
+          GENRE: ${{ matrix.simulateur }}
         run: |
-          udid=$(scripts/simulateur.sh)
+          udid=$(scripts/simulateur.sh "$GENRE")
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
-      - name: Fabrication et tests (unitaires, interface, audit d'accessibilité)
+      - name: Fabrication et tests
+        env:
+          UDID: ${{ steps.simulateur.outputs.udid }}
+          TESTS: ${{ matrix.tests }}
+          LARGEUR: ${{ matrix.largeur }}
+          RESULTATS: ${{ matrix.resultats }}
+          NOM: ${{ matrix.nom }}
         run: |
           set -o pipefail
+          seulement=()
+          if [[ -n "$TESTS" ]]; then seulement=("-only-testing:$TESTS"); fi
+          # la largeur maximale fait échouer le test de l'en-tête sur un écran plus large que l'iPhone visé
+          if [[ -n "$LARGEUR" ]]; then export TEST_RUNNER_ALFRED_LARGEUR_MAX="$LARGEUR"; fi
           xcodebuild test -quiet \
             -project Alfred.xcodeproj -scheme Alfred \
-            -destination "id=${{ steps.simulateur.outputs.udid }}" \
-            -resultBundlePath "$RUNNER_TEMP/Resultats.xcresult" \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+            -destination "id=$UDID" \
+            "${seulement[@]}" \
+            -resultBundlePath "$RUNNER_TEMP/$RESULTATS.xcresult" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild-$NOM.log"
       # « !cancelled() » plutôt que « always() » : après un échec, la suite tourne quand même ; après une annulation
       # (un envoi plus récent), plus rien ne tourne (« always() » continuerait jusqu'à 10 min sur le Mac)
-      - name: iPad, disposition large
-        if: ${{ !cancelled() }}
-        run: |
-          set -o pipefail
-          ipad=$(scripts/simulateur.sh ipad)
-          xcodebuild test -quiet \
-            -project Alfred.xcodeproj -scheme Alfred \
-            -destination "id=$ipad" \
-            -only-testing:AlfredUITests/ParcoursUITests/testDispositionLarge \
-            -resultBundlePath "$RUNNER_TEMP/ResultatsIPad.xcresult" \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild-ipad.log"
-      - name: iPhone le plus étroit (en-tête)
-        if: ${{ !cancelled() }}
-        # 390 pt : le plus étroit des iPhone visés (iPhone 12 à 14, 16e) ; le test échoue sur un écran plus large
-        run: |
-          set -o pipefail
-          iphone=$(scripts/simulateur.sh etroit)
-          TEST_RUNNER_ALFRED_LARGEUR_MAX=390 xcodebuild test -quiet \
-            -project Alfred.xcodeproj -scheme Alfred \
-            -destination "id=$iphone" \
-            -only-testing:AlfredUITests/ParcoursUITests/testEnTete \
-            -resultBundlePath "$RUNNER_TEMP/ResultatsEtroit.xcresult" \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/xcodebuild-etroit.log"
       - name: Résumé des tests (échecs, captures)
         if: ${{ !cancelled() }}
+        env:
+          RESULTATS: ${{ matrix.resultats }}
         run: |
-          mkdir -p "$RUNNER_TEMP/captures"
-          for nom in Resultats ResultatsIPad ResultatsEtroit; do
-            R="$RUNNER_TEMP/$nom.xcresult"
-            [ -d "$R" ] || { echo "$nom : pas de résultats"; continue; }
-            if xcrun xcresulttool get test-results summary --path "$R" --compact > "$RUNNER_TEMP/resume.json"; then
-              {
-                echo "$nom"
-                echo '```'
-                jq -r '"\(.result) : \(.passedTests) réussis, \(.failedTests) en échec, \(.skippedTests) ignorés",
-                  (.testFailures[]? | "✘ \(.testIdentifierString // .testName)", (.failureText | split("\n")[] | "✘   \(.)"))' \
-                  "$RUNNER_TEMP/resume.json"
-                echo '```'
-              } | tee -a "$GITHUB_STEP_SUMMARY"
-            else
-              xcrun xcresulttool help get test-results || true
-            fi
-            mkdir -p "$RUNNER_TEMP/captures/$nom"
-            xcrun xcresulttool export attachments --path "$R" --output-path "$RUNNER_TEMP/captures/$nom" \
-              || xcrun xcresulttool help export || true
-          done
+          R="$RUNNER_TEMP/$RESULTATS.xcresult"
+          mkdir -p "$RUNNER_TEMP/captures/$RESULTATS"
+          [ -d "$R" ] || { echo "$RESULTATS : pas de résultats"; exit 0; }
+          if xcrun xcresulttool get test-results summary --path "$R" --compact > "$RUNNER_TEMP/resume.json"; then
+            {
+              echo "$RESULTATS"
+              echo '```'
+              jq -r '"\(.result) : \(.passedTests) réussis, \(.failedTests) en échec, \(.skippedTests) ignorés",
+                (.testFailures[]? | "✘ \(.testIdentifierString // .testName)", (.failureText | split("\n")[] | "✘   \(.)"))' \
+                "$RUNNER_TEMP/resume.json"
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            xcrun xcresulttool help get test-results || true
+          fi
+          xcrun xcresulttool export attachments --path "$R" --output-path "$RUNNER_TEMP/captures/$RESULTATS" \
+            || xcrun xcresulttool help export || true
       - name: Captures d'écran
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: captures-ios
+          name: captures-ios-${{ matrix.nom }}
           path: ${{ runner.temp }}/captures
           retention-days: 14
           if-no-files-found: ignore
@@ -212,12 +269,8 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: resultats-ios
+          name: resultats-ios-${{ matrix.nom }}
           path: |
-            ${{ runner.temp }}/Resultats.xcresult
-            ${{ runner.temp }}/ResultatsIPad.xcresult
-            ${{ runner.temp }}/ResultatsEtroit.xcresult
-            ${{ runner.temp }}/xcodebuild.log
-            ${{ runner.temp }}/xcodebuild-ipad.log
-            ${{ runner.temp }}/xcodebuild-etroit.log
+            ${{ runner.temp }}/${{ matrix.resultats }}.xcresult
+            ${{ runner.temp }}/xcodebuild-${{ matrix.nom }}.log
           retention-days: 14

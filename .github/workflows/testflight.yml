@@ -7,7 +7,12 @@
 # « externe » (coché par défaut, et toujours sur une étiquette) : une fois envoyée, la fabrication part aussi au groupe
 # des testeurs externes, après l'examen d'Apple (workflow « Testeurs externes », action « soumettre »).
 # Rien ne part sans « Intégration » réussie sur le même commit (job « integration-verte »).
+# 22.10 : part AUSSI tout seul quand l'Intégration d'un envoi sur main réussit — seulement depuis
+# ce dépôt, sur le commit VÉRIFIÉ (pas la tête de main au lancement), et seulement si ce qui part dans l'app a changé
+# depuis la dernière fabrication (`scripts/outils/changements.py testflight` : ni les tests ni la CI seuls ne fabriquent).
+# Comme une étiquette, il envoie aussi aux testeurs externes. Le titre de l'exécution nomme le commit fabriqué.
 name: TestFlight
+run-name: TestFlight ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   workflow_dispatch:
@@ -22,6 +27,10 @@ on:
         default: true
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: ["Intégration"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -33,25 +42,64 @@ concurrency:
 jobs:
   integration-verte:
     name: Intégration verte pour ce commit
+    # lancé par une Intégration : seulement un ENVOI sur main de CE dépôt, réussi (jamais une demande de fusion, ni une
+    # copie du dépôt : ce workflow lit les secrets de signature)
+    if: >-
+      github.event_name != 'workflow_run' || (
+        github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      fabriquer: ${{ steps.fabriquer.outputs.fabriquer }}
     steps:
+      # lancé par une Intégration, « github.sha » est la tête de main au lancement : le commit vérifié est head_sha
+      - name: Commit à fabriquer
+        id: commit
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit invalide"; exit 1; }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
       # rien ne part à TestFlight sans que la CI (« Intégration ») ait réussi sur ce même commit
       - name: Dernière « Intégration » du commit
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
         run: |
-          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" \
+          n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=success&per_page=1" \
             --jq '.total_count')
           [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 ]] \
-            || { echo "::error::« Intégration » n'a pas réussi sur ${GITHUB_SHA::7} : TestFlight attend la CI verte"; exit 1; }
-          echo "« Intégration » réussie sur ${GITHUB_SHA::7}"
+            || { echo "::error::« Intégration » n'a pas réussi sur ${SHA::7} : TestFlight attend la CI verte"; exit 1; }
+          echo "« Intégration » réussie sur ${SHA::7}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_run'
+        with:
+          ref: ${{ steps.commit.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # à la main ou par une étiquette : toujours ; lancé par une Intégration : seulement si l'app livrée a changé
+      - name: Ce qui part dans l'app a-t-il changé ?
+        id: fabriquer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            python3 scripts/outils/changements.py testflight "$SHA"
+          else
+            echo "fabriquer=true" >> "$GITHUB_OUTPUT"
+          fi
 
   testflight:
     name: Fabriquer et envoyer
     needs: integration-verte
+    if: needs.integration-verte.outputs.fabriquer == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -61,6 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.integration-verte.outputs.sha }}
           persist-credentials: false
       - name: XcodeGen
         run: |
@@ -105,7 +154,7 @@ jobs:
             ALFRED_BUILD="${{ github.run_number }}" 2>&1 | tee "$RUNNER_TEMP/archive.log"
       - name: Envoi à TestFlight
         env:
-          # sur une étiquette, « inputs » est vide : l'envoi a lieu (null != false vaut faux dans les expressions)
+          # sur une étiquette ou lancé par une Intégration, « inputs » est vide : l'envoi a lieu
           ENVOYER: ${{ github.event_name != 'workflow_dispatch' || inputs.envoyer }}
           ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
           ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
@@ -114,7 +163,7 @@ jobs:
           set -o pipefail
           plutil -create xml1 "$RUNNER_TEMP/export.plist"
           plutil -insert method -string app-store-connect "$RUNNER_TEMP/export.plist"
-          if [[ "$ENVOYER" == true ]]; then destination=upload; else destination=export; fi
+          if [[ "$ENVOYER" == true ]]; then destination="upload"; else destination="export"; fi
           plutil -insert destination -string "$destination" "$RUNNER_TEMP/export.plist"
           plutil -insert teamID -string "$APPLE_EQUIPE_ID" "$RUNNER_TEMP/export.plist"
           plutil -insert signingStyle -string automatic "$RUNNER_TEMP/export.plist"
@@ -137,7 +186,7 @@ jobs:
   externe:
     name: Testeurs externes
     needs: testflight
-    # sur une étiquette, « inputs » est vide : l'envoi aux testeurs externes a lieu
+    # sur une étiquette ou lancé par une Intégration, « inputs » est vide : l'envoi aux testeurs externes a lieu
     if: github.event_name != 'workflow_dispatch' || (inputs.envoyer && inputs.externe)
     uses: ./.github/workflows/testeurs-externes.yml
     with:

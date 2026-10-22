@@ -89,11 +89,12 @@ swift test --package-path Paquets/AlfredKit
 
 | Workflow | Quand | Quoi |
 |---|---|---|
-| `Intégration` | Chaque envoi, chaque demande de fusion | gitleaks ; tests des outils Python (App Store Connect simulé, masques des journaux, icône à jour) ; `AlfredKit` sous Linux et macOS ; swift-format ; fabrication ; tests unitaires et d’interface ; audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
+| `Intégration` | Chaque envoi, chaque demande de fusion | Sous Linux d’abord : gitleaks ; tests des outils Python (App Store Connect et GitHub simulés, masques des journaux, icône à jour) ; `AlfredKit` ; swift-format et tailles de texte figées (avant de réserver un Mac) ; « l’app a-t-elle changé ? ». Puis, si l’app a changé, sur trois Mac en parallèle : fabrication, `AlfredKit` sous macOS, tests unitaires et d’interface, audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; et l’icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift, des workflows et des outils Python |
-| `TestFlight` | À la main, ou sur une étiquette `v*` | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes, puis aux testeurs externes après l’examen d’Apple (« externe », coché par défaut) ; à la main, « envoyer » décoché : archive et export signés seulement |
+| `TestFlight` | À la main, sur une étiquette `v*`, ou tout seul quand `Intégration` réussit sur un envoi sur `main` et que ce qui part dans l’app a changé depuis la dernière fabrication | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes, puis aux testeurs externes après l’examen d’Apple (« externe », coché par défaut) ; à la main, « envoyer » décoché : archive et export signés seulement |
 | `Testeurs externes` | À la main, ou appelé par `TestFlight` | Groupe externe sans lien public, informations de test et contact de l’examen d’Apple, envoi d’une fabrication à l’examen, invitations ; aucune donnée personnelle dans le journal (secrets masqués champ par champ) |
 | `Certificats` | À la main | Inventaire des certificats de signature de l’équipe (sans aucun nom), ou création du certificat unique de la CI |
+| `Fiche App Store` | À la main | Visuels « En-tête et résultats de recherche » de la version modifiable ; icône extraite de chaque fabrication ; fabrication rattachée à la version (rien n’est soumis) |
 
 **Protections de la chaîne :**
 - les actions sont épinglées par empreinte, et Dependabot les tient à jour ;
@@ -101,8 +102,12 @@ swift test --package-path Paquets/AlfredKit
 - les outils téléchargés sont vérifiés par leur SHA-256 ;
 - seuls `TestFlight`, `Testeurs externes` et `Certificats` lisent des secrets, à la main ou sur étiquette ; une
   contribution extérieure n’en reçoit jamais ;
-- `TestFlight` ne part que si `Intégration` a réussi sur le même commit ; sur `main`, aucun run d’`Intégration`
-  n’est annulé, pour que chaque commit ait son verdict ;
+- `TestFlight` ne part que si `Intégration` a réussi sur le même commit, et fabrique ce commit-là (lancé par
+  `Intégration`, jamais depuis une copie du dépôt ni une demande de fusion) ;
+- un run d’`Intégration` remplacé par un envoi plus récent s’annule, sur `main` aussi ; « l’app a-t-elle changé ? »
+  compare à la dernière `Intégration` RÉUSSIE (jamais au commit précédent) et, sans base certaine, tout tourne
+  (`scripts/outils/changements.py`). Une étiquette `v*` doit donc viser un commit dont l’`Intégration` a réussi ;
+  sinon, lancer `Intégration` à la main sur l’étiquette ;
 - les journaux sont publics : le nom du titulaire du certificat de signature y est masqué dès sa lecture, comme le
   contact de l’examen d’Apple et les testeurs.
 
