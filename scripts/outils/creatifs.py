@@ -91,19 +91,19 @@ def formats(ref, type_):
     """Pour un type d'emplacement : catégories acceptées, plafond par groupe (version de l'App Store) et, par groupe,
     les spécifications d'image qu'il accepte."""
     specs = {_cle(s, "specId", "id"): s for s in ref.get("imageSpecs") or []}
-    t = next((x for x in ref.get("placementTypes") or [] if _cle(x, "placementType", "type", "id") == type_), {}) or {}
+    t = next((x for x in ref.get("placementTypes") or [] if _cle(x, "placementTypeId", "placementType") == type_), {}) or {}
     groupes = {}
     for m in t.get("specMappings") or []:
-        g = _cle(m, "placementGroup", "groupId", "group", "id")
+        g = _cle(m, "placementGroupId", "placementGroup")
         groupes[g] = [specs[i] for i in (m.get("specs") or []) if i in specs]
     plafonds = {}
     for f in ref.get("features") or []:
-        if _cle(f, "feature", "id", "name") != FONCTION:
+        if _cle(f, "featureId", "feature") != FONCTION:
             continue
         for p in f.get("placementPolicies") or []:
-            if _cle(p, "placementType", "type") == type_:
+            if _cle(p, "placementTypeId", "placementType") == type_:
                 for lim in p.get("groupLimits") or []:
-                    for g in lim.get("groupIds") or []:
+                    for g in _cle(lim, "placementGroupIds", "groupIds") or []:
                         plafonds[g] = lim.get("maxCount")
     return {"categories": t.get("acceptsAssetCategories") or [], "groupes": groupes, "plafonds": plafonds}
 
@@ -176,6 +176,9 @@ def etat():
     for nom, type_ in TYPES.items():
         f = formats(ref, type_)
         print(f"{nom} ({type_}) : catégories {f['categories']}")
+        if not f["plafonds"]:         # plafond introuvable : montrer la politique de la version (rien de personnel)
+            pol = [x for x in ref.get("features") or [] if FONCTION in json.dumps(x)]
+            print(f"  politique : {json.dumps(pol)[:800]}")
         if not f["groupes"]:          # forme des données de référence inattendue : la montrer (rien de personnel)
             brut = [x for x in ref.get("placementTypes") or [] if type_ in json.dumps(x)]
             print(f"  données de référence ({', '.join(sorted(ref))}) : {json.dumps(brut)[:1500]}")

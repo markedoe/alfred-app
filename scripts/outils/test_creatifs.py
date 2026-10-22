@@ -45,14 +45,14 @@ SPEC_RECHERCHE = {"specId": "s-recherche", "shortName": "i3840x2560a0",
                   "aspectRatio": "3:2", "alphaAllowed": False, "fileExtensions": [".jpg", ".jpeg", ".png"],
                   "maxFileSize": 50_000_000, "universalAsset": False}
 REF = {
-    "features": [{"feature": "APP_STORE_VERSIONS", "placementPolicies": [
-        {"placementType": "PRODUCT_PAGE_HEADER_ASSET", "groupLimits": [{"groupIds": ["UNIVERSAL"], "maxCount": 1}]},
-        {"placementType": "APP_STORE_SEARCH_RESULTS_ASSET", "groupLimits": [{"groupIds": ["UNIVERSAL"], "maxCount": 1}]}]}],
+    "features": [{"featureId": "APP_STORE_VERSIONS", "placementPolicies": [
+        {"placementTypeId": "PRODUCT_PAGE_HEADER_ASSET", "groupLimits": [{"placementGroupIds": ["UNIVERSAL"], "maxCount": 1}]},
+        {"placementTypeId": "APP_STORE_SEARCH_RESULTS_ASSET", "groupLimits": [{"placementGroupIds": ["UNIVERSAL"], "maxCount": 1}]}]}],
     "placementTypes": [
-        {"placementType": "PRODUCT_PAGE_HEADER_ASSET", "acceptsAssetCategories": ["CREATIVE_ASSETS"],
-         "specMappings": [{"placementGroup": "UNIVERSAL", "specs": ["s-entete"]}]},
-        {"placementType": "APP_STORE_SEARCH_RESULTS_ASSET", "acceptsAssetCategories": ["CREATIVE_ASSETS"],
-         "specMappings": [{"placementGroup": "UNIVERSAL", "specs": ["s-recherche"]}]}],
+        {"placementTypeId": "PRODUCT_PAGE_HEADER_ASSET", "acceptsAssetCategories": ["CREATIVE_ASSETS"],
+         "specMappings": [{"placementGroupId": "UNIVERSAL", "specs": ["s-entete"]}]},
+        {"placementTypeId": "APP_STORE_SEARCH_RESULTS_ASSET", "acceptsAssetCategories": ["CREATIVE_ASSETS"],
+         "specMappings": [{"placementGroupId": "UNIVERSAL", "specs": ["s-recherche"]}]}],
     "imageSpecs": [SPEC_ENTETE, SPEC_RECHERCHE],
 }
 
