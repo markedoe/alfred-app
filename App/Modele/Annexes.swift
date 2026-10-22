@@ -5,7 +5,8 @@ import Observation
 /// Les annexes de la console, autour de la conversation : documents, notifications, liens vers les autres systèmes
 /// et état des services. Mêmes routes et mêmes rythmes que la console :
 /// - documents : toutes les 60 s, toutes les 2,5 s tant qu'un document est en lecture, 30 s après un échec ;
-/// - notifications : toutes les 15 s (la personne connectée seulement) ;
+/// - notifications : toutes les 15 s (la personne connectée seulement) ; toutes les 3 s pendant l'attente d'une réponse
+///   d'Hermes posée ici (22.10), réclamée puis passée à la conversation pour être lue ;
 /// - liens : une fois (redemandés toutes les 15 s si la maison ne répond pas) ;
 /// - état des services : toutes les 30 s.
 /// Rien ne tourne app cachée : `suspendre()` arrête tout, `reprendre()` relit tout de suite.
@@ -32,6 +33,8 @@ final class Annexes {
     private(set) var liens: [LienSysteme] = []
     private(set) var etat: EtatServices?
 
+    /// 22.10 : la conversation qui attend une réponse d'Hermes posée ici, et la lit.
+    @ObservationIgnored weak var conversation: Conversation?
     @ObservationIgnored private let acces: any AccesRelais
     @ObservationIgnored private let aviser: @MainActor (String, Conversation.Avis.Genre) -> Void
     @ObservationIgnored private var taches: [String: Task<Void, Never>] = [:]
@@ -150,18 +153,36 @@ final class Annexes {
     }
 
     private func chargerNotifications() async -> Duration {
-        guard let (statut, corps) = try? await acces.lire("/notifications") else { return .seconds(15) }
+        conversation?.expirerAttenteHermes()
+        conversation?.livrerDifferees()
+        let attente = conversation?.attenteHermes
+        let pas: Duration = attente != nil || conversation?.differees.isEmpty == false ? .seconds(3) : .seconds(15)
+        guard let (statut, corps) = try? await acces.lire("/notifications") else { return pas }
         if statut == 401 {
             if notificationsPermises { notificationsPermises = false }
-            return .seconds(15)
+            return pas
         }
         guard statut == 200, let l = try? JSONDecoder().decode(ListeNotifications.self, from: corps) else {
-            return .seconds(15)
+            return pas
         }
         if !notificationsPermises { notificationsPermises = true }
         if l.notifications != notifications { notifications = l.notifications }
         if l.nonLues != nonLues { nonLues = l.nonLues }
-        return .seconds(15)
+        if let attente, let conversation, let n = l.reponseHermes(depuis: attente) {
+            await reclamer(n, pour: conversation)
+        }
+        return pas
+    }
+
+    /// La réponse d'Hermes à lire : réclamée au relais (la première console ou app seulement), puis passée à la
+    /// conversation ; une autre l'a prise : rien.
+    private func reclamer(_ n: NotificationConsole, pour conversation: Conversation) async {
+        let corps = try? JSONEncoder().encode(["id": n.id])
+        let requete = RequeteRelais(.post, "/notifications/livrer", corps: corps, type: "application/json")
+        guard let (statut, data) = try? await acces.envoyer(requete), statut == 200,
+            let r = try? JSONDecoder().decode(ReponseLivree.self, from: data), r.ok
+        else { return }
+        conversation.recevoirDifferee(texte: r.message ?? n.message, chemin: r.cheminVoix)
     }
 
     /// Comme la console : maison muette (5xx) → redemandée toutes les 15 s ; une liste vide n'est pas redemandée.

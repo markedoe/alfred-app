@@ -79,8 +79,29 @@ final class Conversation {
     /// Le micro est ouvert (conversation continue).
     private(set) var enConversation = false
     /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,
-    /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout). Au repos, iOS reprend la main.
-    var ecranAllume: Bool { enConversation || phase != .repos || envoiEnCours }
+    /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout) ; aussi pendant l'attente d'une
+    /// réponse d'Hermes (5 min au plus) et jusqu'à sa lecture. Au repos, iOS reprend la main.
+    var ecranAllume: Bool {
+        enConversation || phase != .repos || envoiEnCours || attenteHermes != nil || !differees.isEmpty
+    }
+
+    /// Une réponse d'Hermes réclamée, pas encore montrée ni lue.
+    struct ReponseDifferee: Equatable, Sendable {
+        let texte: String
+        let chemin: String?
+        let aVoix: Bool
+    }
+
+    /// 22.10 (retour d'essai : « je m'attendais à ce qu'Alfred me dicte la réponse d'Hermes ») : une question confiée à
+    /// Hermes ICI (l'outil script__demander_hermes). Sa réponse arrive plus tard : `Annexes` la réclame au relais
+    /// (toutes les 3 s pendant l'attente, 5 min au plus) et la passe à `recevoirDifferee`.
+    private(set) var attenteHermes: Date?
+    private(set) var differees: [ReponseDifferee] = []
+    /// La question partie à la voix (ou réponses écrites lues) : sa réponse se lit ; sinon, elle s'affiche seulement.
+    @ObservationIgnored private var hermesAVoix = true
+    /// Appelé quand une attente commence : `Annexes` relit les notifications tout de suite.
+    @ObservationIgnored var quandAttenteHermes: (@MainActor () -> Void)?
+    static let attenteHermesMax: TimeInterval = 5 * 60
     private(set) var avis: Avis?
     /// La réponse à une question écrite qui n'est pas lue à voix haute, ou l'échec d'une demande : VoiceOver la dit.
     /// Jamais micro ouvert (le micro entendrait VoiceOver).
@@ -475,6 +496,7 @@ final class Conversation {
                 $0.outils.append(
                     Outil(id: appel.id, nom: appel.nomCourt, arguments: appel.argumentsEnTexte, etat: .enCours))
             }
+            if appel.nomCourt.hasSuffix("demander_hermes") { attendreHermes() }
         case .outilTermine(let id, let succes):
             modifierReponse { m in
                 if let i = m.outils.firstIndex(where: { $0.id == id }) { m.outils[i].etat = succes ? .fait : .echec }
@@ -536,6 +558,53 @@ final class Conversation {
             finRecue = true
             modifierReponse { $0.enCours = false }
             if !voixEnCours { tourFini() }
+        }
+    }
+
+    // MARK: - réponse d'Hermes, lue ici (22.10)
+
+    func attendreHermes() {
+        attenteHermes = .now
+        hermesAVoix = tourVocal || lireReponsesEcrites
+        quandAttenteHermes?()
+    }
+
+    /// Au bout de 5 min, l'attente se ferme (le relais a envoyé la réponse sur le téléphone).
+    func expirerAttenteHermes(maintenant: Date = .now) {
+        if let a = attenteHermes, maintenant.timeIntervalSince(a) > Self.attenteHermesMax { attenteHermes = nil }
+    }
+
+    /// La réponse réclamée : montrée, puis lue, dès que possible.
+    func recevoirDifferee(texte: String, chemin: String?) {
+        attenteHermes = nil
+        guard !texte.isEmpty else { return }
+        differees.append(ReponseDifferee(texte: texte, chemin: chemin, aVoix: hermesAVoix))
+        livrerDifferees()
+    }
+
+    /// Au repos, ou micro ouvert avant toute phrase : affichée comme une réponse d'Alfred, puis lue comme une réponse
+    /// ordinaire (micro ouvert, `entendre` ignore tout pendant la voix, puis Alfred réécoute avec la marge d'après
+    /// réponse). Pendant un tour : au prochain passage d'`Annexes` (toutes les 3 s).
+    func livrerDifferees() {
+        guard let d = differees.first, !envoiEnCours, !voixEnCours else { return }
+        guard phase == .repos || (phase == .ecoute && !tourOuvert) else { return }
+        differees.removeFirst()
+        messages.append(Message(id: UUID(), auteur: .alfred, texte: d.texte, date: .now))
+        guard d.aVoix, let chemin = d.chemin else {
+            annoncer(d.texte)
+            return
+        }
+        minuterieSilence?.cancel()
+        voixEnCours = true
+        finRecue = true
+        phase = .reponse
+        let id = UUID()
+        lectureEnCours = id
+        lecture = Task { [weak self] in
+            guard let self else { return }
+            await self.voix.lire(chemin)
+            guard self.lectureEnCours == id else { return }
+            self.voixFinie()
         }
     }
 

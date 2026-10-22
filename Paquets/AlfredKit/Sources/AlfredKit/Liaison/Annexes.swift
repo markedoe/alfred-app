@@ -35,16 +35,64 @@ public struct NotificationConsole: Sendable, Equatable, Identifiable, Decodable 
     /// Heure de réception (secondes depuis 1970).
     public let t: Double
     public let lu: Bool
+    /// D'où elle vient (« hermes » : une réponse d'Hermes).
+    public let source: String?
+    /// 22.10 : une réponse d'Hermes que la console ou l'app qui l'attend doit réclamer et lire
+    /// (`POST /notifications/livrer`) ; `livree` : déjà réclamée (par elle ou par une autre).
+    public let aLire: Bool?
+    public let livree: Bool?
 
-    public init(id: String, titre: String?, message: String, t: Double, lu: Bool) {
+    public init(
+        id: String, titre: String?, message: String, t: Double, lu: Bool, source: String? = nil, aLire: Bool? = nil,
+        livree: Bool? = nil
+    ) {
         self.id = id
         self.titre = titre
         self.message = message
         self.t = t
         self.lu = lu
+        self.source = source
+        self.aLire = aLire
+        self.livree = livree
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, titre, message, t, lu, source, livree
+        case aLire = "a_lire"
     }
 
     public var date: Date { Date(timeIntervalSince1970: t) }
+}
+
+extension ListeNotifications {
+    /// 22.10 : la réponse d'Hermes à lire, arrivée depuis la question (5 s de marge : horloges) et pas encore réclamée.
+    public func reponseHermes(depuis: Date) -> NotificationConsole? {
+        notifications.first {
+            $0.source == "hermes" && $0.aLire == true && $0.livree != true && $0.t >= depuis.timeIntervalSince1970 - 5
+        }
+    }
+}
+
+/// 22.10 : la réponse d'une réclamation (`POST /notifications/livrer`) : `ok` pour la PREMIÈRE console ou app
+/// seulement, avec le texte et le jeton de la voix d'Alfred (absent si la voix n'a pas pu être préparée).
+public struct ReponseLivree: Sendable, Equatable, Decodable {
+    public let ok: Bool
+    public let message: String?
+    public let tts: String?
+
+    public init(ok: Bool, message: String?, tts: String?) {
+        self.ok = ok
+        self.message = message
+        self.tts = tts
+    }
+
+    /// Le chemin de la voix sur le relais (`/tts/<jeton>`), seulement pour un jeton fait de caractères sûrs.
+    public var cheminVoix: String? {
+        guard let tts, !tts.isEmpty, tts.count <= 200,
+            tts.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "_.-".contains($0)) })
+        else { return nil }
+        return "/tts/" + tts
+    }
 }
 
 public struct ListeNotifications: Sendable, Equatable, Decodable {

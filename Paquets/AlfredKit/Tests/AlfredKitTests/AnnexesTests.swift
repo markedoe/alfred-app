@@ -103,6 +103,28 @@ struct AnnexesTests {
         #expect(sansLien.kuma == nil && sansLien.groupes.isEmpty && !sansLien.panne)
     }
 
+    @Test("Réponse d'Hermes à lire (22.10) : champs lus, choisie si récente et pas réclamée, voix sûre seulement")
+    func reponseHermes() throws {
+        let l = try JSONDecoder().decode(
+            ListeNotifications.self,
+            from: Self.json(
+                #"{"notifications":[{"id":"h2","t":1792240100,"titre":"Hermes","message":"Prise","source":"hermes","a_lire":true,"livree":true,"lu":true},{"id":"h1","t":1792240050,"titre":"Hermes","message":"La facture est arrivée.","source":"hermes","a_lire":true,"livree":false,"lu":false},{"id":"n1","t":1792240000,"message":"Lessive","source":"notify.mobile_app_m","lu":false}],"non_lues":2}"#
+            ))
+        let h1 = l.notifications[1]
+        #expect(h1.aLire == true && h1.livree == false && l.notifications[2].aLire == nil)
+        let question = Date(timeIntervalSince1970: 1_792_240_000)
+        #expect(l.reponseHermes(depuis: question)?.id == "h1", "la déjà réclamée et l'ordinaire sont sautées")
+        let apres = Date(timeIntervalSince1970: 1_792_240_200)
+        #expect(l.reponseHermes(depuis: apres) == nil, "plus ancienne que la question")
+        let r = try JSONDecoder().decode(
+            ReponseLivree.self, from: Self.json(#"{"ok":true,"message":"La facture est arrivée.","tts":"ab_12.mp3"}"#))
+        #expect(r.ok && r.cheminVoix == "/tts/ab_12.mp3")
+        #expect(ReponseLivree(ok: true, message: "x", tts: "../etat").cheminVoix == nil, "jamais une autre route")
+        #expect(ReponseLivree(ok: true, message: "x", tts: nil).cheminVoix == nil)
+        let non = try JSONDecoder().decode(ReponseLivree.self, from: Self.json(#"{"ok":false}"#))
+        #expect(!non.ok && non.message == nil)
+    }
+
     @Test("Heure d'une notification : comme la console")
     func quand() throws {
         var cal = Calendar(identifier: .gregorian)

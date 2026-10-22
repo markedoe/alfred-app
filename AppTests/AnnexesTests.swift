@@ -85,6 +85,20 @@ struct AnnexesTests {
         a.suspendre()
     }
 
+    @Test("Réponse d'Hermes (22.10) : réclamée une seule fois pendant l'attente, puis passée à la conversation")
+    func reponseHermes() async throws {
+        let acces = AccesHermesDeTest()
+        let c = Conversation(voix: VoixMuette())
+        let a = Annexes(acces: acces) { _, _ in }
+        a.conversation = c
+        c.attendreHermes()
+        a.demarrer(connecte: true)
+        try await Self.attendre { c.messages.contains { $0.texte == AccesHermesDeTest.texte } }
+        #expect(acces.reclamations == 1)
+        #expect(c.attenteHermes == nil)
+        a.suspendre()
+    }
+
     @Test("Invité (non connecté) : ni notifications ni liens")
     func invite() async throws {
         let a = Annexes(acces: AccesDemo()) { _, _ in }
@@ -99,4 +113,37 @@ struct AnnexesTests {
 @MainActor
 final class Recueil {
     var textes: [String] = []
+}
+
+/// 22.10 : un relais qui n'a qu'une réponse d'Hermes « à lire », réclamable une seule fois (comme le vrai).
+final class AccesHermesDeTest: AccesRelais, @unchecked Sendable {
+    static let texte = "La facture du garage est arrivée."
+    private let verrou = NSLock()
+    private var _reclamations = 0
+    var reclamations: Int { verrou.withLock { _reclamations } }
+
+    func ouvrir() async throws -> any Liaison {
+        throw ErreurRelais("pas de liaison dans ce test")
+    }
+
+    func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
+        guard chemin == "/notifications" else { return (404, Data()) }
+        let prise = reclamations > 0
+        let n: [String: Any] = [
+            "id": "h1", "t": Date.now.timeIntervalSince1970, "titre": "Hermes", "message": Self.texte,
+            "source": "hermes", "a_lire": true, "livree": prise, "lu": prise,
+        ]
+        let corps = try JSONSerialization.data(withJSONObject: ["notifications": [n], "non_lues": prise ? 0 : 1])
+        return (200, corps)
+    }
+
+    func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data) {
+        guard requete.chemin == "/notifications/livrer" else { return (404, Data()) }
+        let premiere = verrou.withLock {
+            _reclamations += 1
+            return _reclamations == 1
+        }
+        let r: [String: Any] = premiere ? ["ok": true, "message": Self.texte, "tts": "hermes.mp3"] : ["ok": false]
+        return (200, try JSONSerialization.data(withJSONObject: r))
+    }
 }

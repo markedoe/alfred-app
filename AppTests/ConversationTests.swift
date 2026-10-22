@@ -283,6 +283,61 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    @Test("Réponse d'Hermes au repos (22.10) : affichée comme une réponse d'Alfred, lue ; écran allumé jusque-là")
+    func hermesAuRepos() async throws {
+        let (c, client, voix) = try await Self.monter(RelaisDeTest())
+        c.lireReponsesEcrites = true
+        c.attendreHermes()
+        #expect(c.ecranAllume, "l'attente de la réponse garde l'écran allumé")
+        c.recevoirDifferee(texte: "La facture est arrivée.", chemin: "/tts/hermes.mp3")
+        try await Self.attendre(c) { $0.phase == .repos && !$0.ecranAllume }
+        #expect(c.messages.last?.auteur == .alfred && c.messages.last?.texte == "La facture est arrivée.")
+        #expect(voix.lues == ["/tts/hermes.mp3"])
+        #expect(c.attenteHermes == nil && c.differees.isEmpty)
+        await client.arreter()
+    }
+
+    @Test("Réponse d'Hermes micro ouvert (22.10) : lue pendant que le micro n'écoute pas, puis Alfred réécoute")
+    func hermesEnConversation() async throws {
+        let (c, client, voix) = try await Self.monter(RelaisDeTest())
+        await c.basculerEcoute()
+        c.attendreHermes()
+        c.recevoirDifferee(texte: "Réponse d’Hermes.", chemin: "/tts/hermes.mp3")
+        try await Self.attendre(c) { $0.phase == .ecoute && !voix.lues.isEmpty }
+        #expect(voix.lues == ["/tts/hermes.mp3"])
+        #expect(c.enConversation && c.messages.last?.texte == "Réponse d’Hermes.")
+        await c.couper()
+        await client.arreter()
+    }
+
+    @Test("Réponse d'Hermes pendant un tour (22.10) : elle attend sa fin ; question écrite : affichée, pas lue")
+    func hermesPendantUnTour() async throws {
+        let (c, client, voix) = try await Self.monter(RelaisDeTest())
+        c.attendreHermes()
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        c.recevoirDifferee(texte: "Plus tard.", chemin: "/tts/hermes.mp3")
+        if c.phase == .reflexion {
+            #expect(c.differees.count == 1, "un tour est en cours : la réponse d'Hermes attend")
+        }
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count >= 3 }
+        c.livrerDifferees()
+        #expect(c.messages.contains { $0.auteur == .alfred && $0.texte == "Plus tard." })
+        #expect(c.differees.isEmpty)
+        #expect(voix.lues.isEmpty, "question écrite, réponses écrites non lues : affichée seulement")
+        await client.arreter()
+    }
+
+    @Test("Attente d'Hermes : elle se ferme au bout de 5 min (le téléphone a pris le relais)")
+    func hermesAttenteExpiree() async throws {
+        let (c, client, _) = try await Self.monter(RelaisDeTest())
+        c.attendreHermes()
+        c.expirerAttenteHermes(maintenant: .now.addingTimeInterval(60))
+        #expect(c.attenteHermes != nil)
+        c.expirerAttenteHermes(maintenant: .now.addingTimeInterval(Conversation.attenteHermesMax + 1))
+        #expect(c.attenteHermes == nil && !c.ecranAllume)
+        await client.arreter()
+    }
+
     @Test("Écrire dans une conversation : elle reste ouverte, la réponse est lue, puis Alfred réécoute (21.10)")
     func ecrireEnConversation() async throws {
         let relais = RelaisDeTest()

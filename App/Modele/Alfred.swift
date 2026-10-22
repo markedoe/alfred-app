@@ -160,7 +160,11 @@ final class Alfred {
         relais = acces
         liaison = .connexion
         let conversation = conversation
-        annexes = Annexes(acces: acces) { texte, genre in conversation.aviser(texte, genre) }
+        let annexes = Annexes(acces: acces) { texte, genre in conversation.aviser(texte, genre) }
+        // 22.10 : une réponse d'Hermes posée ici est réclamée par les annexes et lue par la conversation
+        annexes.conversation = conversation
+        conversation.quandAttenteHermes = { [weak annexes] in annexes?.relireNotifications() }
+        self.annexes = annexes
         if let voix { conversation.remplacerVoix(voix) }
         conversation.client = client
         abonnement?.cancel()
