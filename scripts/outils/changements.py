@@ -115,9 +115,9 @@ def decider(cle, base, tete, hors, quoi):
         return ecrire(cle, True, f"base {str(base)[:7]} absente ou hors de l'historique de {tete[:7]} : tout tourne")
     comptent = touches(fichiers_changes(base, tete), hors)
     if comptent:
-        return ecrire(cle, True, f"{quoi} changé depuis {base[:7]} : " + ", ".join(comptent[:10])
+        return ecrire(cle, True, f"{quoi} : changé depuis {base[:7]} — " + ", ".join(comptent[:10])
                       + (f" (+{len(comptent) - 10})" if len(comptent) > 10 else ""))
-    return ecrire(cle, False, f"{quoi} identique à {base[:7]} (seuls des fichiers hors de l'app ont changé)")
+    return ecrire(cle, False, f"{quoi} : identique à {base[:7]} (seuls des fichiers hors de l'app ont changé)")
 
 
 # MARK: - commandes
