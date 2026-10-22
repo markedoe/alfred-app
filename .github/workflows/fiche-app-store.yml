@@ -1,0 +1,56 @@
+# Fiche App Store : « En-tête et résultats de recherche » (iOS 27 et plus), par l'API App Store Connect :
+# `scripts/outils/creatifs.py`. À la main seulement.
+#   etat      la version modifiable, ses langues, ce qui y est placé, et les formats qu'Apple accepte
+#   deposer   les images du dossier AppStore/ (entete.png, recherche.png) : déposées dans la bibliothèque de l'app,
+#             puis placées sur chaque langue de la version modifiable. Rien n'est envoyé à l'examen d'Apple : les
+#             images partent avec la version, quand elle est soumise.
+# Le journal est public : seulement des identifiants techniques, des états et des dimensions.
+name: Fiche App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "etat ou deposer"
+        type: choice
+        options: [etat, deposer]
+        default: etat
+
+permissions:
+  contents: read
+
+jobs:
+  fiche:
+    name: Fiche App Store (${{ inputs.action }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: fiche-app-store
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Clé d'API App Store Connect
+        env:
+          ASC_CLE_P8_B64: ${{ secrets.ASC_CLE_P8_B64 }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+        run: scripts/cle-asc.sh
+      - name: App Store Connect
+        env:
+          ACTION: ${{ inputs.action }}
+          ASC_CLE_ID: ${{ secrets.ASC_CLE_ID }}
+          ASC_EMETTEUR_ID: ${{ secrets.ASC_EMETTEUR_ID }}
+        run: |
+          export ASC_CLE="$RUNNER_TEMP/asc/AuthKey_${ASC_CLE_ID}.p8"
+          outil=scripts/outils/creatifs.py
+          case "$ACTION" in
+            etat) python3 "$outil" etat ;;
+            deposer)
+              python3 "$outil" deposer --entete AppStore/entete.png --recherche AppStore/recherche.png
+              python3 "$outil" etat ;;
+            *) echo "::error::action inconnue"; exit 1 ;;
+          esac
+      - name: Effacer la clé
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
