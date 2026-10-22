@@ -277,29 +277,37 @@ private struct BoutonEnTete: View {
     }
 }
 
-/// Un compteur rond de la console (`#docs-count`, `#notifs-count`) : chiffres mono, 20 pt de haut.
+/// Un compteur rond de la console (`#docs-count`, `#notifs-count`) : chiffres mono, 20 pt de haut ; `pastille` : le petit
+/// compteur posé sur le coin de l'icône (téléphone), 15 pt, taille fixe comme les pastilles d'iOS (la barre garde
+/// l'agrandisseur d'accessibilité).
 private struct Compteur: View {
     let nombre: Int
     let fond: Color
     let texte: Color
+    var pastille = false
 
     var body: some View {
         Text("\(nombre)")
-            .font(.caption2.weight(.bold).monospaced())
+            .font(pastille ? .system(size: 10, weight: .bold, design: .monospaced) : .caption2.weight(.bold).monospaced())
             .foregroundStyle(texte)
-            .padding(.horizontal, 6)
-            .frame(minWidth: 20, minHeight: 20)
+            .padding(.horizontal, pastille ? 4 : 6)
+            .frame(minWidth: pastille ? 15 : 20, minHeight: pastille ? 15 : 20)
             .background(fond, in: .capsule)
             .accessibilityHidden(true)
     }
 }
 
 /// Un bouton de fenêtre de l'en-tête (Documents, Notifications) : un bouton de la console (fond, bordure acier) ; son
-/// texte et son compteur au-delà de 560 pt ; en dessous, son icône et son compteur centrés dans un cadre de 38 × 44 pt
-/// (la console : `width: 38px; padding: 0`), dont le compteur déborde un peu, comme dans la console.
-private struct BoutonFenetre: View {
+/// texte et son compteur au-delà de 560 pt ; en dessous, son icône centrée dans un cadre de 38 × 34 pt (la hauteur des
+/// autres boutons de l'en-tête), le compteur en pastille sur le coin de l'icône.
+/// 22.10 (retour d’essai : les compteurs dépassaient du bouton) : avant, l'icône (18), 6 et le compteur (20 au
+/// moins) tenaient côte à côte dans 38 pt (la console : `width: 38px; padding: 0`) et débordaient du cadre ; désormais
+/// rien n'en sort (EnTeteTests).
+struct BoutonFenetre: View {
     /// Ce dont la cible de 44 pt déborde du cadre de 38 pt, de chaque côté (téléphone).
     static let debord: CGFloat = 3
+    /// Le cadre du téléphone : 38 pt de large (la console), 34 de haut (les boutons-icônes de l'en-tête).
+    static let cadre = CGSize(width: 44 - 2 * debord, height: 34)
 
     let titre: String
     let icone: String
@@ -328,13 +336,17 @@ private struct BoutonFenetre: View {
                     .padding(.horizontal, 12)
                     .frame(minHeight: 34)
                 } else {
-                    // l'icône de la console : un carré de 18 pt, son tracé d'environ 11 × 14 pt
-                    HStack(spacing: 6) {
-                        Image(systemName: icone).font(.footnote.weight(.medium)).frame(width: 18, height: 18)
-                        compteur
-                    }
-                    .fixedSize()
-                    .frame(width: 44 - 2 * Self.debord, height: 44)
+                    // l'icône de la console : un carré de 18 pt, son tracé d'environ 11 × 14 pt ; le compteur sur son
+                    // coin haut-droit, comme une pastille de la barre d'onglets d'iOS (dans le cadre jusqu'à « 999 »)
+                    Image(systemName: icone).font(.footnote.weight(.medium)).frame(width: 18, height: 18)
+                        .overlay(alignment: .topTrailing) {
+                            if nombre > 0 {
+                                Compteur(nombre: nombre, fond: fondCompteur, texte: texteCompteur, pastille: true)
+                                    .fixedSize()
+                                    .offset(x: 6, y: -5)
+                            }
+                        }
+                        .frame(width: Self.cadre.width, height: Self.cadre.height)
                 }
             }
             .foregroundStyle(Color(.glace))
