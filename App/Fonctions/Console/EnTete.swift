@@ -278,17 +278,21 @@ private struct BoutonEnTete: View {
 }
 
 /// Un compteur rond de la console (`#docs-count`, `#notifs-count`) : chiffres mono, 20 pt de haut ; `pastille` : le petit
-/// compteur posé sur le coin de l'icône (téléphone), 15 pt, taille fixe comme les pastilles d'iOS (la barre garde
-/// l'agrandisseur d'accessibilité).
+/// compteur posé sur le coin de l'icône (téléphone), 15 pt, chiffres de 10 pt à la taille par défaut (l'en-tête
+/// plafonne la taille du texte à « Large » : jamais plus grand ; la barre garde l'agrandisseur d'accessibilité).
 private struct Compteur: View {
     let nombre: Int
     let fond: Color
     let texte: Color
     var pastille = false
+    @ScaledMetric(relativeTo: .caption2) private var taillePastille: CGFloat = 10
 
     var body: some View {
         Text("\(nombre)")
-            .font(pastille ? .system(size: 10, weight: .bold, design: .monospaced) : .caption2.weight(.bold).monospaced())
+            .font(
+                pastille
+                    ? .system(size: taillePastille, weight: .bold, design: .monospaced)
+                    : .caption2.weight(.bold).monospaced())
             .foregroundStyle(texte)
             .padding(.horizontal, pastille ? 4 : 6)
             .frame(minWidth: pastille ? 15 : 20, minHeight: pastille ? 15 : 20)

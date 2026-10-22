@@ -14,17 +14,24 @@ struct EnTeteTests {
         rendu.scale = echelle
         rendu.isOpaque = false
         let image = try #require(rendu.cgImage)
-        let l = image.width, h = image.height
+        let l = image.width
+        let h = image.height
         var octets = [UInt8](repeating: 0, count: l * h * 4)
         let contexte = try #require(
             CGContext(
                 data: &octets, width: l, height: h, bitsPerComponent: 8, bytesPerRow: l * 4,
                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         contexte.draw(image, in: CGRect(x: 0, y: 0, width: l, height: h))
-        var x0 = l, y0 = h, x1 = -1, y1 = -1
+        var x0 = l
+        var y0 = h
+        var x1 = -1
+        var y1 = -1
         for y in 0..<h {
             for x in 0..<l where octets[(y * l + x) * 4 + 3] > 24 {
-                x0 = min(x0, x); x1 = max(x1, x); y0 = min(y0, y); y1 = max(y1, y)
+                x0 = min(x0, x)
+                x1 = max(x1, x)
+                y0 = min(y0, y)
+                y1 = max(y1, y)
             }
         }
         return CGRect(
