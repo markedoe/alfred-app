@@ -319,7 +319,8 @@ struct ConversationTests {
         if c.phase == .reflexion {
             #expect(c.differees.count == 1, "un tour est en cours : la réponse d'Hermes attend")
         }
-        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count >= 3 }
+        // le tour écrit fini (sa question et sa réponse) ; la réponse d'Hermes part au passage suivant des annexes
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count >= 2 }
         c.livrerDifferees()
         #expect(c.messages.contains { $0.auteur == .alfred && $0.texte == "Plus tard." })
         #expect(c.differees.isEmpty)
