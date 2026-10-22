@@ -54,6 +54,11 @@ struct Racine: View {
             }
         }
         .animation(.smooth, value: alfred.etape)
+        // pas de verrouillage automatique pendant une conversation (iOS ignore ce réglage en arrière-plan) ; au repos,
+        // il reprend
+        .onChange(of: alfred.conversation.ecranAllume, initial: true) { _, allume in
+            UIApplication.shared.isIdleTimerDisabled = allume
+        }
     }
 }
 

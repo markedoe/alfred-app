@@ -78,6 +78,9 @@ final class Conversation {
     private(set) var messages: [Message] = []
     /// Le micro est ouvert (conversation continue).
     private(set) var enConversation = false
+    /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,
+    /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout). Au repos, iOS reprend la main.
+    var ecranAllume: Bool { enConversation || phase != .repos || envoiEnCours }
     private(set) var avis: Avis?
     /// La réponse à une question écrite qui n'est pas lue à voix haute, ou l'échec d'une demande : VoiceOver la dit.
     /// Jamais micro ouvert (le micro entendrait VoiceOver).

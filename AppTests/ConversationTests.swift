@@ -267,6 +267,22 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    @Test("Écran allumé pendant une conversation, verrouillage d'iOS au repos (22.10 : il coupait tout)")
+    func ecranAllume() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, _) = try await Self.monter(relais)
+        #expect(!c.ecranAllume, "au repos, l'iPhone se verrouille comme d'habitude")
+        await c.basculerEcoute()
+        #expect(c.enConversation && c.ecranAllume, "micro ouvert : pas de verrouillage")
+        #expect(await c.ecrire("Quelle heure est-il ?"))
+        try await Self.attendre(c) { $0.phase == .ecoute && $0.messages.count == 2 }
+        #expect(c.ecranAllume, "après la réponse, Alfred réécoute : toujours allumé")
+        await c.couper()
+        try await Self.attendre(c) { $0.phase == .repos && !$0.enConversation }
+        #expect(!c.ecranAllume, "conversation finie : le verrouillage reprend")
+        await client.arreter()
+    }
+
     @Test("Écrire dans une conversation : elle reste ouverte, la réponse est lue, puis Alfred réécoute (21.10)")
     func ecrireEnConversation() async throws {
         let relais = RelaisDeTest()
