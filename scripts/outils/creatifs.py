@@ -7,6 +7,9 @@
                                             dépose chaque image dans la bibliothèque de l'app, attend son traitement,
                                             puis la place sur chaque langue de la version modifiable (remplace ce qui
                                             y était) ; RIEN n'est envoyé à l'examen : l'image part avec la version
+    creatifs.py icones                      lecture seule : l'icône qu'App Store Connect a extraite de chaque fabrication
+                                            récente (types et dimensions, « Build Icons ») et la fabrication rattachée
+                                            à chaque version
 
 Bibliothèque d'éléments de l'app (App Asset Library, API App Store Connect 4.5.1, documentation d'Apple :
 « Placing assets on your App Store surfaces ») : une image est réservée, envoyée, validée, traitée, puis placée sur une
@@ -197,6 +200,42 @@ def etat():
                 for nom, p in places.items()))
 
 
+# MARK: - icones (lecture seule)
+
+
+def _dimensions(asset):
+    return f"{asset.get('width')}×{asset.get('height')}" if asset else "?"
+
+
+def icones(nombre=5):
+    """L'icône de chaque fabrication récente telle qu'App Store Connect l'a extraite du binaire (« Build Icons » :
+    type, dimensions, verre liquide), puis la fabrication rattachée à chaque version (celle dont l'icône est montrée
+    pour la version). Ni adresse d'image ni contenu : des types, des états et des dimensions."""
+    app = appli()
+    builds = api("GET", requete_url("/v1/builds", **{
+        "filter[app]": app["id"], "sort": "-uploadedDate", "limit": str(nombre),
+        "fields[builds]": "version,processingState,uploadedDate,iconAssetToken"}))
+    for b in builds["data"]:
+        a = b["attributes"]
+        try:
+            extraites = ", ".join(
+                f"{x['attributes'].get('iconType')} {_dimensions(x['attributes'].get('iconAsset'))}"
+                f"{' (verre)' if x['attributes'].get('masked') else ''}"
+                for x in lister(f"/v1/builds/{b['id']}/icons")) or "AUCUNE"
+        except ErreurASC as e:
+            extraites = f"illisibles ({e})"
+        jeton = a.get("iconAssetToken")
+        print(f"fabrication {a.get('version')} ({(a.get('uploadedDate') or '?')[:16]}, {a.get('processingState')}) : "
+              f"icône {_dimensions(jeton) if jeton else 'AUCUNE'} ; icônes extraites : {extraites}")
+    for v in versions(app["id"]):
+        try:
+            rattachee = (api("GET", f"/v1/appStoreVersions/{v['id']}/build") or {}).get("data")
+            numero = rattachee["attributes"].get("version") if rattachee else "AUCUNE"
+        except ErreurASC as e:
+            numero = f"illisible ({e})"
+        print(f"version {v['attributes'].get('versionString')} ({etat_version(v)}) : fabrication rattachée {numero}")
+
+
 # MARK: - deposer
 
 
@@ -268,6 +307,8 @@ def deposer(fichiers):
 def main(argv):
     if argv[:1] == ["etat"]:
         etat()
+    elif argv[:1] == ["icones"]:
+        icones()
     elif argv[:1] == ["deposer"]:
         fichiers, reste = {}, argv[1:]
         while reste:

@@ -4,6 +4,8 @@
 #   deposer   les images du dossier AppStore/ (entete.png, recherche.png) : déposées dans la bibliothèque de l'app,
 #             puis placées sur chaque langue de la version modifiable. Rien n'est envoyé à l'examen d'Apple : les
 #             images partent avec la version, quand elle est soumise.
+#   icones    lecture seule : l'icône qu'App Store Connect a extraite de chaque fabrication récente, et la fabrication
+#             rattachée à chaque version
 # Le journal est public : seulement des identifiants techniques, des états et des dimensions.
 name: Fiche App Store
 
@@ -11,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "etat ou deposer"
+        description: "etat, icones ou deposer"
         type: choice
-        options: [etat, deposer]
+        options: [etat, icones, deposer]
         default: etat
 
 permissions:
@@ -46,6 +48,7 @@ jobs:
           outil=scripts/outils/creatifs.py
           case "$ACTION" in
             etat) python3 "$outil" etat ;;
+            icones) python3 "$outil" icones ;;
             deposer)
               python3 "$outil" deposer --entete AppStore/entete.png --recherche AppStore/recherche.png
               python3 "$outil" etat ;;

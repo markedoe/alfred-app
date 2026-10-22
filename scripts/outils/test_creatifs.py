@@ -177,5 +177,45 @@ class Deposer(unittest.TestCase):
             creatifs.modifiable("app1")
 
 
+class Icones(unittest.TestCase):
+    def test_lecture_seule_types_dimensions_et_version(self):
+        appels = []
+        icone = {"templateUrl": "https://exemple.invalid/{w}x{h}.png", "width": 1024, "height": 1024}
+
+        def faux_api(methode, chemin, corps=None):
+            appels.append((methode, chemin))
+            if chemin.startswith("/v1/builds?"):
+                return {"data": [
+                    {"id": "b2", "attributes": {"version": "2", "processingState": "VALID",
+                                                "uploadedDate": "2026-01-02T01:00:00Z", "iconAssetToken": None}},
+                    {"id": "b1", "attributes": {"version": "1", "processingState": "VALID",
+                                                "uploadedDate": "2026-01-01T01:00:00Z", "iconAssetToken": icone}}]}
+            if chemin == "/v1/appStoreVersions/v1/build":
+                return {"data": {"id": "b1", "attributes": {"version": "1"}}}
+            raise AssertionError(chemin)
+
+        def faux_lister(chemin):
+            appels.append(("GET", chemin))
+            if chemin == "/v1/builds/b1/icons":
+                return [{"attributes": {"iconType": "APP_STORE", "iconAsset": icone, "masked": True}}]
+            if chemin == "/v1/builds/b2/icons":
+                return []
+            if "/appStoreVersions?" in chemin:
+                return [{"id": "v1", "attributes": {"versionString": "1.0", "appVersionState": "PREPARE_FOR_SUBMISSION"}}]
+            raise AssertionError(chemin)
+
+        sortie = io.StringIO()
+        with mock.patch.object(creatifs, "api", faux_api), mock.patch.object(creatifs, "lister", faux_lister), \
+                mock.patch.object(creatifs, "appli", lambda: {"id": "app1", "attributes": {}}), redirect_stdout(sortie):
+            creatifs.icones()
+        texte = sortie.getvalue()
+        self.assertIn("fabrication 2 (2026-01-02T01:00, VALID) : icône AUCUNE ; icônes extraites : AUCUNE", texte)
+        self.assertIn("fabrication 1 (2026-01-01T01:00, VALID) : icône 1024×1024 ; icônes extraites : "
+                      "APP_STORE 1024×1024 (verre)", texte)
+        self.assertIn("version 1.0 (PREPARE_FOR_SUBMISSION) : fabrication rattachée 1", texte)
+        self.assertNotIn("exemple.invalid", texte)           # journal public : jamais l'adresse d'une image
+        self.assertFalse([a for a in appels if a[0] != "GET"])
+
+
 if __name__ == "__main__":
     unittest.main()
