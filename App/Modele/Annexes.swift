@@ -9,7 +9,8 @@ import Observation
 ///   d'Hermes posée ici (22.10), réclamée puis passée à la conversation pour être lue ;
 /// - liens : une fois (redemandés toutes les 15 s si la maison ne répond pas) ;
 /// - état des services : toutes les 30 s.
-/// Rien ne tourne app cachée : `suspendre()` arrête tout, `reprendre()` relit tout de suite.
+/// Rien ne tourne app cachée : `suspendre()` arrête tout (une réclamation déjà partie finit, et sa réponse attend le
+/// retour à l'écran), `reprendre()` relit tout de suite.
 @Observable @MainActor
 final class Annexes {
     /// Ce qu'un document peut montrer à la place de la liste (accès refusé, liste indisponible).
@@ -35,6 +36,10 @@ final class Annexes {
 
     /// 22.10 : la conversation qui attend une réponse d'Hermes posée ici, et la lit.
     @ObservationIgnored weak var conversation: Conversation?
+    /// La réclamation en cours d'une réponse d'Hermes (23.10) : une tâche à part, qu'aucune relecture ni suspension
+    /// n'annule (coupée en route, la réponse, déjà marquée livrée par le relais, n'était ni lue ni envoyée au
+    /// téléphone).
+    @ObservationIgnored private var reclamation: Task<Void, Never>?
     @ObservationIgnored private let acces: any AccesRelais
     @ObservationIgnored private let aviser: @MainActor (String, Conversation.Avis.Genre) -> Void
     @ObservationIgnored private var taches: [String: Task<Void, Never>] = [:]
@@ -155,8 +160,8 @@ final class Annexes {
     private func chargerNotifications() async -> Duration {
         conversation?.expirerAttenteHermes()
         conversation?.livrerDifferees()
-        let attente = conversation?.attenteHermes
-        let pas: Duration = attente != nil || conversation?.differees.isEmpty == false ? .seconds(3) : .seconds(15)
+        let attend = conversation.map { !$0.attentesHermes.isEmpty || !$0.differees.isEmpty } ?? false
+        let pas: Duration = attend ? .seconds(3) : .seconds(15)
         guard let (statut, corps) = try? await acces.lire("/notifications") else { return pas }
         if statut == 401 {
             if notificationsPermises { notificationsPermises = false }
@@ -168,21 +173,32 @@ final class Annexes {
         if !notificationsPermises { notificationsPermises = true }
         if l.notifications != notifications { notifications = l.notifications }
         if l.nonLues != nonLues { nonLues = l.nonLues }
-        if let attente, let conversation, let n = l.reponseHermes(depuis: attente) {
-            await reclamer(n, pour: conversation)
+        // la plus ancienne attente, relue après la lecture : une déconnexion a pu tout fermer entre-temps
+        if actif, reclamation == nil, let conversation, let attente = conversation.attentesHermes.first,
+            let n = l.reponseHermes(depuis: attente.posee)
+        {
+            reclamer(n, pour: attente.numero, conversation)
         }
         return pas
     }
 
     /// La réponse d'Hermes à lire : réclamée au relais (la première console ou app seulement), puis passée à la
-    /// conversation ; une autre l'a prise : rien.
-    private func reclamer(_ n: NotificationConsole, pour conversation: Conversation) async {
+    /// conversation pour cette attente ; une autre l'a prise : rien. L'app cachée entre-temps, elle attend le retour à
+    /// l'écran (rien ne se lit écran caché).
+    private func reclamer(_ n: NotificationConsole, pour numero: Int, _ conversation: Conversation) {
         let corps = try? JSONEncoder().encode(["id": n.id])
         let requete = RequeteRelais(.post, "/notifications/livrer", corps: corps, type: "application/json")
-        guard let (statut, data) = try? await acces.envoyer(requete), statut == 200,
-            let r = try? JSONDecoder().decode(ReponseLivree.self, from: data), r.ok
-        else { return }
-        conversation.recevoirDifferee(texte: r.message ?? n.message, chemin: r.cheminVoix)
+        let acces = acces
+        reclamation = Task { [weak self] in
+            let reponse = try? await acces.envoyer(requete)
+            self?.reclamation = nil
+            guard let (statut, data) = reponse, statut == 200,
+                let r = try? JSONDecoder().decode(ReponseLivree.self, from: data), r.ok
+            else { return }
+            let visible = self?.cachee == false
+            conversation.recevoirDifferee(
+                texte: r.message ?? n.message, chemin: r.cheminVoix, attente: numero, livrer: visible)
+        }
     }
 
     /// Comme la console : maison muette (5xx) → redemandée toutes les 15 s ; une liste vide n'est pas redemandée.

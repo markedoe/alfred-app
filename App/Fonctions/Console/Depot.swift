@@ -50,6 +50,8 @@ struct Depot: View {
                 Task { await deposer(scan: pages) }
             }
             .ignoresSafeArea()
+            // comme les fenêtres de la console : l'environnement redonné à la présentation (Mac, 23.10)
+            .environment(alfred)
         }
         .onChange(of: photo) { _, element in
             guard let element else { return }

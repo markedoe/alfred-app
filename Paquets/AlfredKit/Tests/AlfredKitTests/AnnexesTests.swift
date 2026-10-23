@@ -116,6 +116,14 @@ struct AnnexesTests {
         #expect(l.reponseHermes(depuis: question)?.id == "h1", "la déjà réclamée et l'ordinaire sont sautées")
         let apres = Date(timeIntervalSince1970: 1_792_240_200)
         #expect(l.reponseHermes(depuis: apres) == nil, "plus ancienne que la question")
+        // 23.10 : deux questions de suite, deux réponses prêtes (le relais les range la plus récente d'abord) : la plus
+        // ancienne d'abord, dans l'ordre des questions
+        let deux = try JSONDecoder().decode(
+            ListeNotifications.self,
+            from: Self.json(
+                #"{"notifications":[{"id":"h4","t":1792240090,"titre":"Hermes","message":"Seconde","source":"hermes","a_lire":true,"livree":false,"lu":false},{"id":"h3","t":1792240060,"titre":"Hermes","message":"Première","source":"hermes","a_lire":true,"livree":false,"lu":false}],"non_lues":2}"#
+            ))
+        #expect(deux.reponseHermes(depuis: question)?.id == "h3")
         let r = try JSONDecoder().decode(
             ReponseLivree.self, from: Self.json(#"{"ok":true,"message":"La facture est arrivée.","tts":"ab_12.mp3"}"#))
         #expect(r.ok && r.cheminVoix == "/tts/ab_12.mp3")

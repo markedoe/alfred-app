@@ -287,13 +287,13 @@ struct ConversationTests {
     func hermesAuRepos() async throws {
         let (c, client, voix) = try await Self.monter(RelaisDeTest())
         c.lireReponsesEcrites = true
-        c.attendreHermes()
+        let attente = c.attendreHermes()
         #expect(c.ecranAllume, "l'attente de la réponse garde l'écran allumé")
-        c.recevoirDifferee(texte: "La facture est arrivée.", chemin: "/tts/hermes.mp3")
+        c.recevoirDifferee(texte: "La facture est arrivée.", chemin: "/tts/hermes.mp3", attente: attente.numero)
         try await Self.attendre(c) { $0.phase == .repos && !$0.ecranAllume }
         #expect(c.messages.last?.auteur == .alfred && c.messages.last?.texte == "La facture est arrivée.")
         #expect(voix.lues == ["/tts/hermes.mp3"])
-        #expect(c.attenteHermes == nil && c.differees.isEmpty)
+        #expect(c.attentesHermes.isEmpty && c.differees.isEmpty)
         await client.arreter()
     }
 
@@ -301,8 +301,8 @@ struct ConversationTests {
     func hermesEnConversation() async throws {
         let (c, client, voix) = try await Self.monter(RelaisDeTest())
         await c.basculerEcoute()
-        c.attendreHermes()
-        c.recevoirDifferee(texte: "Réponse d’Hermes.", chemin: "/tts/hermes.mp3")
+        let attente = c.attendreHermes()
+        c.recevoirDifferee(texte: "Réponse d’Hermes.", chemin: "/tts/hermes.mp3", attente: attente.numero)
         try await Self.attendre(c) { $0.phase == .ecoute && !voix.lues.isEmpty }
         #expect(voix.lues == ["/tts/hermes.mp3"])
         #expect(c.enConversation && c.messages.last?.texte == "Réponse d’Hermes.")
@@ -313,9 +313,9 @@ struct ConversationTests {
     @Test("Réponse d'Hermes pendant un tour (22.10) : elle attend sa fin ; question écrite : affichée, pas lue")
     func hermesPendantUnTour() async throws {
         let (c, client, voix) = try await Self.monter(RelaisDeTest())
-        c.attendreHermes()
+        let attente = c.attendreHermes()
         #expect(await c.ecrire("Quelle heure est-il ?"))
-        c.recevoirDifferee(texte: "Plus tard.", chemin: "/tts/hermes.mp3")
+        c.recevoirDifferee(texte: "Plus tard.", chemin: "/tts/hermes.mp3", attente: attente.numero)
         if c.phase == .reflexion {
             #expect(c.differees.count == 1, "un tour est en cours : la réponse d'Hermes attend")
         }
@@ -333,10 +333,61 @@ struct ConversationTests {
         let (c, client, _) = try await Self.monter(RelaisDeTest())
         c.attendreHermes()
         c.expirerAttenteHermes(maintenant: .now.addingTimeInterval(60))
-        #expect(c.attenteHermes != nil)
+        #expect(!c.attentesHermes.isEmpty)
         c.expirerAttenteHermes(maintenant: .now.addingTimeInterval(Conversation.attenteHermesMax + 1))
-        #expect(c.attenteHermes == nil && !c.ecranAllume)
+        #expect(c.attentesHermes.isEmpty && !c.ecranAllume)
         await client.arreter()
+    }
+
+    @Test("Deux questions à Hermes de suite (23.10) : chacune son attente et sa réponse ; la voix suit chaque question")
+    func hermesDeuxQuestions() async throws {
+        let voix = VoixMuette()
+        let c = Self.seule(voix)
+        // la 1re question part avec les réponses écrites lues, la 2e sans
+        let premiere = c.attendreHermes(appel: "q1")
+        c.lireReponsesEcrites = false
+        let seconde = c.attendreHermes(appel: "q2")
+        #expect(c.attentesHermes.map(\.numero) == [premiere.numero, seconde.numero])
+        #expect(premiere.aVoix && !seconde.aVoix)
+        let echeance = seconde.echeance
+        try await Task.sleep(for: .milliseconds(20))
+        c.recevoirDifferee(texte: "Première réponse.", chemin: "/tts/h1.mp3", attente: premiere.numero)
+        try await Self.attendre(c) { $0.phase == .repos && voix.lues.count == 1 }
+        #expect(c.attentesHermes.map(\.numero) == [seconde.numero], "la 2e réponse est encore attendue")
+        #expect(c.ecranAllume)
+        // Hermes ne prend la 2e question qu'après la 1re : ses 5 min repartent de la 1re réponse
+        #expect((c.attentesHermes.first?.echeance ?? .distantPast) > echeance)
+        c.recevoirDifferee(texte: "Seconde réponse.", chemin: "/tts/h2.mp3", attente: seconde.numero)
+        #expect(c.messages.map(\.texte) == ["Première réponse.", "Seconde réponse."])
+        #expect(voix.lues == ["/tts/h1.mp3"], "2e question écrite, réponses écrites non lues : affichée seulement")
+        #expect(c.attentesHermes.isEmpty && c.differees.isEmpty && !c.ecranAllume)
+    }
+
+    @Test("Outil demander_hermes annoncé deux fois dans un tour : une seule attente")
+    func hermesAppelEnDouble() {
+        let c = Conversation(voix: VoixMuette())
+        c.recevoir(.reflechit)
+        let appel = AppelOutil(id: "t1", nom: "script__demander_hermes", arguments: ["question": "Une question"])
+        c.recevoir(.outilCommence(appel))
+        c.recevoir(.outilCommence(appel))
+        #expect(c.attentesHermes.count == 1 && c.attentesHermes.first?.appel == "t1")
+    }
+
+    @Test("Nouvelle conversation (déconnexion) : les attentes et réponses d'Hermes sont oubliées (23.10)")
+    func hermesApresNouvelle() async throws {
+        let voix = VoixMuette()
+        let c = Self.seule(voix)
+        let enRoute = c.attendreHermes()
+        let reclamee = c.attendreHermes()
+        c.recevoirDifferee(texte: "Réponse en suspens.", chemin: "/tts/h1.mp3", attente: reclamee.numero, livrer: false)
+        #expect(c.ecranAllume && c.differees.count == 1 && c.attentesHermes.count == 1)
+        await c.nouvelle()
+        #expect(!c.ecranAllume, "l'écran se verrouille de nouveau")
+        #expect(c.attentesHermes.isEmpty && c.differees.isEmpty)
+        // la réponse d'une réclamation partie avant, arrivée après : son attente n'existe plus
+        c.recevoirDifferee(texte: "Réponse tardive.", chemin: "/tts/h2.mp3", attente: enRoute.numero)
+        c.livrerDifferees()
+        #expect(c.vide && voix.lues.isEmpty && !c.ecranAllume)
     }
 
     @Test("Écrire dans une conversation : elle reste ouverte, la réponse est lue, puis Alfred réécoute (21.10)")

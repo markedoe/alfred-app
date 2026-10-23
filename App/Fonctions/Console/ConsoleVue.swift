@@ -110,6 +110,10 @@ struct ConsoleVue: View {
                 }
                 // la console reste devinée sous le voile de la fenêtre
                 .presentationBackground(.clear)
+                // sur Mac (app iPad), la présentation n'hérite pas toujours de l'environnement : Réglages plantait en
+                // lisant la conversation (retour d'essai, 23.10) ; les deux objets sont donc redonnés ici
+                .environment(alfred)
+                .environment(conversation)
             }
             .onChange(of: fenetre) { _, f in
                 if f != nil {

@@ -75,6 +75,8 @@ struct AccueilVue: View {
         }
         .sheet(isPresented: $connexion) {
             ConnexionVue()
+                // comme les fenêtres de la console : l'environnement redonné à la présentation (Mac, 23.10)
+                .environment(alfred)
         }
         .task(id: alfred.motifAccueil) {
             guard alfred.motifAccueil != nil else { return }

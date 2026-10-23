@@ -79,10 +79,10 @@ final class Conversation {
     /// Le micro est ouvert (conversation continue).
     private(set) var enConversation = false
     /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,
-    /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout) ; aussi pendant l'attente d'une
-    /// réponse d'Hermes (5 min au plus) et jusqu'à sa lecture. Au repos, iOS reprend la main.
+    /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout) ; aussi pendant l'attente des
+    /// réponses d'Hermes (5 min au plus chacune) et jusqu'à leur lecture. Au repos, iOS reprend la main.
     var ecranAllume: Bool {
-        enConversation || phase != .repos || envoiEnCours || attenteHermes != nil || !differees.isEmpty
+        enConversation || phase != .repos || envoiEnCours || !attentesHermes.isEmpty || !differees.isEmpty
     }
 
     /// Une réponse d'Hermes réclamée, pas encore montrée ni lue.
@@ -92,13 +92,28 @@ final class Conversation {
         let aVoix: Bool
     }
 
-    /// 22.10 (retour d'essai : « je m'attendais à ce qu'Alfred me dicte la réponse d'Hermes ») : une question confiée à
-    /// Hermes ICI (l'outil script__demander_hermes). Sa réponse arrive plus tard : `Annexes` la réclame au relais
-    /// (toutes les 3 s pendant l'attente, 5 min au plus) et la passe à `recevoirDifferee`.
-    private(set) var attenteHermes: Date?
+    /// Une question confiée à Hermes ICI, dont la réponse est attendue (23.10 : une attente par question ; avec une
+    /// seule, deux questions de suite ne faisaient lire que la 1re réponse).
+    struct AttenteHermes: Equatable, Sendable {
+        /// La réponse réclamée pour une attente fermée entre-temps (déconnexion, session expirée) est ignorée.
+        let numero: Int
+        /// L'appel de l'outil : un appel annoncé deux fois n'ouvre qu'une attente.
+        let appel: String?
+        /// L'heure de la question : une réponse plus ancienne n'est pas la sienne.
+        let posee: Date
+        /// 5 min après la question, ou après la réponse précédente (Hermes traite une question à la fois).
+        var echeance: Date
+        /// Partie à la voix (ou réponses écrites lues) : sa réponse se lit ; sinon, elle s'affiche seulement.
+        let aVoix: Bool
+    }
+
+    /// 22.10 (retour d'essai : « je m'attendais à ce qu'Alfred me dicte la réponse d'Hermes ») : les questions confiées
+    /// à Hermes ICI (l'outil script__demander_hermes), dans l'ordre (le relais y répond dans cet ordre, une à la fois).
+    /// Leurs réponses arrivent plus tard : `Annexes` les réclame au relais (toutes les 3 s pendant l'attente) et les
+    /// passe à `recevoirDifferee`.
+    private(set) var attentesHermes: [AttenteHermes] = []
     private(set) var differees: [ReponseDifferee] = []
-    /// La question partie à la voix (ou réponses écrites lues) : sa réponse se lit ; sinon, elle s'affiche seulement.
-    @ObservationIgnored private var hermesAVoix = true
+    @ObservationIgnored private var numeroHermes = 0
     /// Appelé quand une attente commence : `Annexes` relit les notifications tout de suite.
     @ObservationIgnored var quandAttenteHermes: (@MainActor () -> Void)?
     static let attenteHermesMax: TimeInterval = 5 * 60
@@ -467,14 +482,23 @@ final class Conversation {
         }
     }
 
-    /// Nouvelle conversation : Alfred oublie le fil (la session de parole de HA).
+    /// Nouvelle conversation : Alfred oublie le fil (la session de parole de HA). Elle sert à la déconnexion, à la
+    /// session expirée et à la sortie de la démo : les réponses d'Hermes attendues ou en suspens sont oubliées aussi
+    /// (23.10 : l'écran ne se verrouillait plus, et la personne suivante pouvait les voir et les entendre) ; celle
+    /// d'une réclamation encore en route est ignorée à son retour (son attente n'existe plus).
     func nouvelle() async {
         await terminer()
         lecture?.cancel()
         voix.interrompre()
+        // une lecture coupée qui finit plus tard ne clôt plus rien
+        lectureEnCours = UUID()
+        voixEnCours = false
+        finRecue = false
         messages = []
         conversationId = nil
         messageAlfred = nil
+        attentesHermes = []
+        differees = []
         phase = .repos
     }
 
@@ -496,7 +520,9 @@ final class Conversation {
                 $0.outils.append(
                     Outil(id: appel.id, nom: appel.nomCourt, arguments: appel.argumentsEnTexte, etat: .enCours))
             }
-            if appel.nomCourt.hasSuffix("demander_hermes") { attendreHermes() }
+            if appel.nomCourt.hasSuffix("demander_hermes"), !attentesHermes.contains(where: { $0.appel == appel.id }) {
+                attendreHermes(appel: appel.id)
+            }
         case .outilTermine(let id, let succes):
             modifierReponse { m in
                 if let i = m.outils.firstIndex(where: { $0.id == id }) { m.outils[i].etat = succes ? .fait : .echec }
@@ -563,23 +589,37 @@ final class Conversation {
 
     // MARK: - réponse d'Hermes, lue ici (22.10)
 
-    func attendreHermes() {
-        attenteHermes = .now
-        hermesAVoix = tourVocal || lireReponsesEcrites
+    /// Une question confiée à Hermes : une attente de plus, après celles des questions précédentes.
+    @discardableResult
+    func attendreHermes(appel: String? = nil) -> AttenteHermes {
+        numeroHermes += 1
+        let maintenant = Date.now
+        let fin = maintenant.addingTimeInterval(Self.attenteHermesMax)
+        let lue = tourVocal || lireReponsesEcrites
+        let a = AttenteHermes(numero: numeroHermes, appel: appel, posee: maintenant, echeance: fin, aVoix: lue)
+        attentesHermes.append(a)
         quandAttenteHermes?()
+        return a
     }
 
-    /// Au bout de 5 min, l'attente se ferme (le relais a envoyé la réponse sur le téléphone).
+    /// À son échéance, une attente se ferme (le relais a envoyé la réponse sur le téléphone).
     func expirerAttenteHermes(maintenant: Date = .now) {
-        if let a = attenteHermes, maintenant.timeIntervalSince(a) > Self.attenteHermesMax { attenteHermes = nil }
+        guard attentesHermes.contains(where: { maintenant > $0.echeance }) else { return }
+        attentesHermes.removeAll { maintenant > $0.echeance }
     }
 
-    /// La réponse réclamée : montrée, puis lue, dès que possible.
-    func recevoirDifferee(texte: String, chemin: String?) {
-        attenteHermes = nil
+    /// La réponse réclamée pour l'attente `numero` : montrée, puis lue (si sa question l'a été), dès que possible ;
+    /// `livrer` faux (app cachée), elle attend le prochain passage d'`Annexes`. Une attente fermée entre-temps (par
+    /// `nouvelle()` : déconnexion, session expirée, démo quittée) ne livre rien.
+    func recevoirDifferee(texte: String, chemin: String?, attente numero: Int, livrer: Bool = true) {
+        guard let i = attentesHermes.firstIndex(where: { $0.numero == numero }) else { return }
+        let attente = attentesHermes.remove(at: i)
+        // Hermes ne prend la question suivante qu'après celle-ci (une à la fois) : ses 5 min repartent d'ici
+        let fin = Date.now.addingTimeInterval(Self.attenteHermesMax)
+        for j in attentesHermes.indices where attentesHermes[j].echeance < fin { attentesHermes[j].echeance = fin }
         guard !texte.isEmpty else { return }
-        differees.append(ReponseDifferee(texte: texte, chemin: chemin, aVoix: hermesAVoix))
-        livrerDifferees()
+        differees.append(ReponseDifferee(texte: texte, chemin: chemin, aVoix: attente.aVoix))
+        if livrer { livrerDifferees() }
     }
 
     /// Au repos, ou micro ouvert avant toute phrase : affichée comme une réponse d'Alfred, puis lue comme une réponse

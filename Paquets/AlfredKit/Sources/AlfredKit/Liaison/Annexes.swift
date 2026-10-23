@@ -65,11 +65,13 @@ public struct NotificationConsole: Sendable, Equatable, Identifiable, Decodable 
 }
 
 extension ListeNotifications {
-    /// 22.10 : la réponse d'Hermes à lire, arrivée depuis la question (5 s de marge : horloges) et pas encore réclamée.
+    /// 22.10 : la réponse d'Hermes à lire, arrivée depuis la question (5 s de marge : horloges) et pas encore
+    /// réclamée ; la plus ancienne d'abord (23.10 : deux questions de suite, leurs réponses se lisent dans l'ordre).
     public func reponseHermes(depuis: Date) -> NotificationConsole? {
-        notifications.first {
+        let pretes = notifications.filter {
             $0.source == "hermes" && $0.aLire == true && $0.livree != true && $0.t >= depuis.timeIntervalSince1970 - 5
         }
+        return pretes.min { $0.t < $1.t }
     }
 }
 

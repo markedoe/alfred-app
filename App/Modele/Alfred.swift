@@ -196,7 +196,7 @@ final class Alfred {
     /// Quitter la démonstration : retour à l'accueil (ou à la configuration).
     func quitterDemo() async {
         guard demo else { return }
-        await conversation.nouvelle()
+        await oublierLaConversation()
         await fermer()
         demo = false
         etape = configuration == nil ? .configuration : .accueil
@@ -204,10 +204,9 @@ final class Alfred {
 
     /// Se déconnecter : le jeton est supprimé dans HA (route du relais), la session quitte le trousseau.
     func seDeconnecter() async {
-        // plus aucune nouvelle de la maison d'abord : une phrase encore en route ne doit pas reparaître dans la
-        // conversation vidée (iPad partagé : la personne suivante la verrait)
-        arreterAbonnement()
-        await conversation.nouvelle()
+        // plus aucune nouvelle de la maison d'abord : une phrase ou une réponse d'Hermes encore en route ne doit pas
+        // reparaître dans la conversation vidée (iPad partagé : la personne suivante la verrait)
+        await oublierLaConversation()
         var prevenue = true
         if !demo, let relais {
             let reponse = try? await relais.lire("/deconnexion")
@@ -229,16 +228,25 @@ final class Alfred {
         abonnement = nil
     }
 
+    /// Plus aucune nouvelle de la maison (le fil, puis les annexes : une réponse d'Hermes réclamée en route), puis la
+    /// conversation vidée, attentes d'Hermes comprises (23.10) : rien de la personne précédente n'y reparaît.
+    private func oublierLaConversation() async {
+        arreterAbonnement()
+        annexes?.suspendre()
+        await conversation.nouvelle()
+    }
+
     private func fermer() async {
         arreterAbonnement()
-        // le micro se ferme et Alfred se tait ; la voix redevient muette (une démo ouverte ensuite n'a pas de micro)
-        await conversation.couper()
+        annexes?.suspendre()
+        annexes = nil
+        // le micro se ferme, Alfred se tait et la conversation est vidée (par sûreté : la vue suivante montre ses
+        // messages) ; la voix redevient muette (une démo ouverte ensuite n'a pas de micro)
+        conversation.arreterEssai()
+        await conversation.nouvelle()
         conversation.remplacerVoix(VoixMuette())
         releve?.cancel()
         releve = nil
-        conversation.arreterEssai()
-        annexes?.suspendre()
-        annexes = nil
         minuterieVoix?.cancel()
         citations?.cancel()
         voixReconnue = nil
@@ -375,8 +383,7 @@ final class Alfred {
             motifAccueil = "Votre connexion à la maison a expiré. Reconnectez-vous."
             // la personne suivante ne doit voir ni la conversation ni le fil de la précédente (plus aucune nouvelle
             // de la maison d'abord : rien ne doit y reparaître)
-            arreterAbonnement()
-            await conversation.nouvelle()
+            await oublierLaConversation()
             await fermer()
             if let configuration { Trousseau.effacer(compte: configuration.relais.hote) }
             etape = .accueil

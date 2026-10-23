@@ -34,9 +34,12 @@ final class AccesURLSession: NSObject, AccesRelais, URLSessionDelegate, @uncheck
         session.invalidateAndCancel()
     }
 
+    /// « Alfred/<version> (<numéro de version>; iPhone) » : le relais distingue l'app de Safari et sait quelle version
+    /// réclame une réponse d'Hermès (23.10 : quatre réponses jamais lues, sans savoir par quelle version).
     static let agent: String = {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        return "Alfred/\(version) (iPhone)"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "Alfred/\(version) (\(build); iPhone)"
     }()
 
     // MARK: AccesRelais

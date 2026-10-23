@@ -95,7 +95,74 @@ struct AnnexesTests {
         a.demarrer(connecte: true)
         try await Self.attendre { c.messages.contains { $0.texte == AccesHermesDeTest.texte } }
         #expect(acces.reclamations == 1)
-        #expect(c.attenteHermes == nil)
+        #expect(c.attentesHermes.isEmpty)
+        a.suspendre()
+    }
+
+    @Test("Deux questions à Hermes de suite (23.10) : les deux réponses sont réclamées et lues, dans l'ordre")
+    func deuxQuestionsHermes() async throws {
+        let acces = AccesHermesDeTest(prete: false)
+        let voix = VoixMuette()
+        let c = ConversationTests.seule(voix)
+        let a = Annexes(acces: acces) { _, _ in }
+        a.conversation = c
+        c.attendreHermes()
+        c.attendreHermes()
+        a.demarrer(connecte: true)
+        acces.publier("h1", "Première réponse.")
+        a.relireNotifications()
+        try await Self.attendre { c.phase == .repos && voix.lues.count == 1 }
+        #expect(c.messages.map(\.texte) == ["Première réponse."])
+        #expect(c.attentesHermes.count == 1 && c.ecranAllume, "la 2e réponse est encore attendue")
+        acces.publier("h2", "Seconde réponse.")
+        a.relireNotifications()
+        try await Self.attendre { c.phase == .repos && voix.lues.count == 2 }
+        #expect(c.messages.map(\.texte) == ["Première réponse.", "Seconde réponse."])
+        #expect(voix.lues == ["/tts/h1.mp3", "/tts/h2.mp3"])
+        #expect(acces.reclamations == 2 && c.attentesHermes.isEmpty && !c.ecranAllume)
+        a.suspendre()
+    }
+
+    @Test("Réponse d'Hermes réclamée, puis la conversation fermée (déconnexion) avant son retour : ignorée (23.10)")
+    func reponseHermesApresNouvelle() async throws {
+        let acces = AccesHermesDeTest()
+        let porte = PorteDeTest()
+        acces.porte = porte
+        let voix = VoixMuette()
+        let c = ConversationTests.seule(voix)
+        let a = Annexes(acces: acces) { _, _ in }
+        a.conversation = c
+        c.attendreHermes()
+        a.demarrer(connecte: true)
+        try await Self.attendre { acces.reclamations == 1 }
+        // les annexes tournent encore : seule l'attente fermée par nouvelle() arrête la réponse
+        await c.nouvelle()
+        await porte.ouvrir()
+        try await Self.attendre { acces.rendues == 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(c.vide && c.differees.isEmpty && voix.lues.isEmpty)
+        #expect(!c.ecranAllume, "l'écran se verrouille de nouveau")
+        a.suspendre()
+    }
+
+    @Test("Une relecture pendant une réclamation ne la coupe pas : la réponse d'Hermes est quand même lue (23.10)")
+    func reclamationNonCoupee() async throws {
+        let acces = AccesHermesDeTest()
+        let porte = PorteDeTest()
+        acces.porte = porte
+        let voix = VoixMuette()
+        let c = ConversationTests.seule(voix)
+        let a = Annexes(acces: acces) { _, _ in }
+        a.conversation = c
+        c.attendreHermes()
+        a.demarrer(connecte: true)
+        try await Self.attendre { acces.reclamations == 1 }
+        // la fenêtre Notifications ouverte, ou une nouvelle question : les notifications se relisent
+        a.relireNotifications()
+        await porte.ouvrir()
+        try await Self.attendre { c.messages.contains { $0.texte == AccesHermesDeTest.texte } }
+        try await Self.attendre { voix.lues == ["/tts/h1.mp3"] }
+        #expect(acces.reclamations == 1 && c.attentesHermes.isEmpty)
         a.suspendre()
     }
 
@@ -115,12 +182,42 @@ final class Recueil {
     var textes: [String] = []
 }
 
-/// 22.10 : un relais qui n'a qu'une réponse d'Hermes « à lire », réclamable une seule fois (comme le vrai).
+/// 22.10 : un relais qui n'a que des réponses d'Hermes « à lire », chacune réclamable une seule fois (comme le vrai :
+/// marquée livrée avant de répondre). `publier` en range une de plus ; `porte` retient la réponse d'une réclamation, et
+/// une réclamation annulée pendant ce temps échoue (comme une requête d'URLSession).
 final class AccesHermesDeTest: AccesRelais, @unchecked Sendable {
     static let texte = "La facture du garage est arrivée."
+
+    private struct Reponse {
+        let id: String
+        let texte: String
+        let t: Double
+        var livree = false
+    }
+
     private let verrou = NSLock()
+    private var _reponses: [Reponse] = []
     private var _reclamations = 0
+    private var _rendues = 0
+    private var _porte: PorteDeTest?
+
+    /// `prete` : la réponse « h1 » (`texte`) est là dès le départ.
+    init(prete: Bool = true) {
+        if prete { publier("h1", Self.texte) }
+    }
+
     var reclamations: Int { verrou.withLock { _reclamations } }
+    /// Les réclamations qui ont reçu leur réponse.
+    var rendues: Int { verrou.withLock { _rendues } }
+    var porte: PorteDeTest? {
+        get { verrou.withLock { _porte } }
+        set { verrou.withLock { _porte = newValue } }
+    }
+
+    func publier(_ id: String, _ texte: String) {
+        let r = Reponse(id: id, texte: texte, t: Date.now.timeIntervalSince1970)
+        verrou.withLock { _reponses.append(r) }
+    }
 
     func ouvrir() async throws -> any Liaison {
         throw ErreurRelais("pas de liaison dans ce test")
@@ -128,22 +225,34 @@ final class AccesHermesDeTest: AccesRelais, @unchecked Sendable {
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
         guard chemin == "/notifications" else { return (404, Data()) }
-        let prise = reclamations > 0
-        let n: [String: Any] = [
-            "id": "h1", "t": Date.now.timeIntervalSince1970, "titre": "Hermes", "message": Self.texte,
-            "source": "hermes", "a_lire": true, "livree": prise, "lu": prise,
-        ]
-        let corps = try JSONSerialization.data(withJSONObject: ["notifications": [n], "non_lues": prise ? 0 : 1])
+        let reponses = verrou.withLock { _reponses }
+        // la plus récente d'abord, comme le relais
+        let liste = reponses.reversed().map { r -> [String: Any] in
+            [
+                "id": r.id, "t": r.t, "titre": "Hermes", "message": r.texte, "source": "hermes", "a_lire": true,
+                "livree": r.livree, "lu": r.livree,
+            ]
+        }
+        let nonLues = reponses.filter { !$0.livree }.count
+        let corps = try JSONSerialization.data(withJSONObject: ["notifications": liste, "non_lues": nonLues])
         return (200, corps)
     }
 
     func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data) {
-        guard requete.chemin == "/notifications/livrer" else { return (404, Data()) }
-        let premiere = verrou.withLock {
+        guard requete.chemin == "/notifications/livrer", let corps = requete.corps,
+            let demande = try JSONSerialization.jsonObject(with: corps) as? [String: String], let id = demande["id"]
+        else { return (404, Data()) }
+        let prise: Reponse? = verrou.withLock {
             _reclamations += 1
-            return _reclamations == 1
+            guard let i = _reponses.firstIndex(where: { $0.id == id && !$0.livree }) else { return nil }
+            _reponses[i].livree = true
+            return _reponses[i]
         }
-        let r: [String: Any] = premiere ? ["ok": true, "message": Self.texte, "tts": "hermes.mp3"] : ["ok": false]
+        if let p = porte { await p.passer() }
+        try Task.checkCancellation()
+        verrou.withLock { _rendues += 1 }
+        var r: [String: Any] = ["ok": false]
+        if let reponse = prise { r = ["ok": true, "message": reponse.texte, "tts": reponse.id + ".mp3"] }
         return (200, try JSONSerialization.data(withJSONObject: r))
     }
 }

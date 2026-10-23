@@ -57,12 +57,23 @@ struct AlfredTests {
         #expect(await a.conversation.ecrire("Quelle heure est-il ?"))
         try await Self.attendre("réponse") { a.conversation.phase == .repos && a.conversation.messages.count == 2 }
         #expect(a.conversation.conversationId == RelaisDeTest.fil)
+        // 23.10 : une question à Hermes encore attendue, et une réponse réclamée pendant un autre tour, qui attend sa
+        // fin (sans ce tour, les annexes la montreraient avant l'expiration, et le test ne prouverait rien)
+        let attendue = a.conversation.attendreHermes()
+        let reclamee = a.conversation.attendreHermes()
+        a.conversation.recevoir(.reflechit)
+        a.conversation.recevoirDifferee(texte: "Réponse privée.", chemin: nil, attente: reclamee.numero, livrer: false)
         // la maison ne connaît plus la personne : à la reconnexion, `/moi` le dit
         relais.connecte = false
         await relais.liaisons.last?.fermer()
         try await Self.attendre("accueil") { a.etape == .accueil }
         #expect(a.motifAccueil == "Votre connexion à la maison a expiré. Reconnectez-vous.")
         #expect(a.conversation.vide && a.conversation.conversationId == nil)
+        #expect(a.conversation.attentesHermes.isEmpty && a.conversation.differees.isEmpty)
+        #expect(!a.conversation.ecranAllume, "l'écran d'accueil se verrouille de nouveau")
+        // la réponse d'une réclamation partie avant : ignorée
+        a.conversation.recevoirDifferee(texte: "Réponse tardive.", chemin: nil, attente: attendue.numero)
+        #expect(a.conversation.vide)
         #expect(a.conversation.voix is VoixMuette)
         #expect(!a.estPret && a.maison["light.salon"] == nil)
     }
@@ -76,13 +87,24 @@ struct AlfredTests {
         try await Self.attendre("prêt") { a.estPret }
         #expect(await a.conversation.ecrire("Quelle heure est-il ?"))
         try await Self.attendre("réponse") { a.conversation.phase == .repos && a.conversation.messages.count == 2 }
+        // 23.10 : une question à Hermes encore attendue, et une réponse réclamée pas encore montrée
+        let attendue = a.conversation.attendreHermes()
+        let reclamee = a.conversation.attendreHermes()
+        a.conversation.recevoirDifferee(texte: "Réponse privée.", chemin: nil, attente: reclamee.numero, livrer: false)
+        #expect(a.conversation.ecranAllume && a.conversation.differees.count == 1)
         await a.seDeconnecter()
         #expect(a.conversation.vide)
+        #expect(a.conversation.attentesHermes.isEmpty && a.conversation.differees.isEmpty)
+        #expect(!a.conversation.ecranAllume, "l'écran d'accueil se verrouille de nouveau")
         #expect(relais.deconnexions == 1 && a.motifAccueil == nil)
         #expect(a.conversation.voix is VoixMuette)
+        // la réponse d'une réclamation partie avant la déconnexion : ignorée
+        a.conversation.recevoirDifferee(texte: "Réponse tardive.", chemin: nil, attente: attendue.numero)
+        #expect(a.conversation.vide)
         a.essayerDemo()
-        try await Self.attendre("démo prête") { a.estPret }
+        try await Self.attendre("démo prête") { a.estPret && a.annexes?.notificationsPermises == true }
         #expect(a.demo && a.conversation.voix is VoixMuette, "la démo : sans réseau ni micro")
+        #expect(a.conversation.vide, "rien de la personne précédente n'arrive à la session suivante")
         await a.quitterDemo()
     }
 }
