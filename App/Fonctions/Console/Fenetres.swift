@@ -388,7 +388,9 @@ private struct ChampEtiquettes: View {
             if choisies.count < Etiquettes.max {
                 TextField("Ajouter une étiquette…", text: $saisie)
                     .focused($focus)
-                    .font(.caption)
+                    // comme « Écrire à Alfred… » (audit d'accessibilité d'Apple, 23.10 : en .caption sans marge verticale,
+                    // le texte du champ risquait d'être coupé aux grandes tailles de caractères)
+                    .font(.callout)
                     .foregroundStyle(Color(.texte))
                     .autocorrectionDisabled()
                     .submitLabel(.done)
@@ -397,7 +399,8 @@ private struct ChampEtiquettes: View {
                             ajouter(c)
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 10)
                     .frame(minHeight: 44)
                     .background(Color(red: 14 / 255, green: 34 / 255, blue: 51 / 255), in: .rect(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.trait), lineWidth: 1.5))
