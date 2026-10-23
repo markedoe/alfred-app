@@ -540,9 +540,14 @@ public struct SuiviLot: Sendable, Equatable {
         public let id: UUID
         public let nom: String
         public var etat: Etat
+        /// 23.10 : le nombre de relectures lancées quand le relais l'a reçu — une liste demandée AVANT ne peut pas le
+        /// contenir, son absence n'y prouve rien.
+        public internal(set) var lecturesAvantRecu = 0
     }
 
     public private(set) var fichiers: [Fichier] = []
+    /// Les relectures de la liste lancées (jamais remis à zéro : un lot suivant garde la même suite de numéros).
+    public private(set) var lecturesLancees = 0
 
     public init() {}
 
@@ -554,6 +559,13 @@ public struct SuiviLot: Sendable, Equatable {
     /// Le relais a reçu le fichier (202) : sa fiche porte son identifiant (sans lui, on ne peut plus le suivre).
     public mutating func recu(_ id: UUID, document: String?) {
         changer(id) { $0 = document.map(Etat.rangement) ?? .fini }
+        if let i = fichiers.firstIndex(where: { $0.id == id }) { fichiers[i].lecturesAvantRecu = lecturesLancees }
+    }
+
+    /// 23.10 : une relecture de la liste part ; son numéro accompagne sa réponse dans `maj(_:lecture:)`.
+    public mutating func lectureLancee() -> Int {
+        lecturesLancees += 1
+        return lecturesLancees
     }
 
     /// Refusé au dépôt (400, 413, 415) ou envoi coupé : plus en cours.
@@ -564,9 +576,11 @@ public struct SuiviLot: Sendable, Equatable {
     }
 
     /// Une relecture du relais : rangé s'il est dans `recents` ; fini s'il est refusé ou n'est plus nulle part. Rend
-    /// true si un document vient d'être rangé.
+    /// true si un document vient d'être rangé. `lecture` : le numéro rendu par `lectureLancee()` quand la liste a été
+    /// demandée (23.10 : une liste partie avant la réception d'un fichier revenait après, sans lui, et le comptait
+    /// « disparu » : « 1 document rangé » au lieu de 2) ; sans numéro, la liste est tenue pour récente.
     @discardableResult
-    public mutating func maj(_ liste: ListeDocuments) -> Bool {
+    public mutating func maj(_ liste: ListeDocuments, lecture: Int = .max) -> Bool {
         var nouveau = false
         for i in fichiers.indices {
             guard case .rangement(let d) = fichiers[i].etat else { continue }
@@ -575,7 +589,7 @@ public struct SuiviLot: Sendable, Equatable {
                 nouveau = true
             } else if let carte = liste.documents.first(where: { $0.id == d }) {
                 if ![.lecture, .rangement].contains(carte.statut) { fichiers[i].etat = .fini }
-            } else {
+            } else if lecture > fichiers[i].lecturesAvantRecu {
                 fichiers[i].etat = .fini
             }
         }

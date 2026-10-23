@@ -203,6 +203,28 @@ struct AnnexesTests {
         #expect(r.lignes.isEmpty && r.confirmation(ListeDocuments(documents: [])) == nil)
         r.nouveau()
         #expect(r.fichiers.isEmpty)
+        // 23.10 : une liste demandée AVANT la réception d'un fichier revient après, sans lui : il reste en cours (le
+        // compter « disparu » donnait « 1 document rangé » au lieu de 2) ; une liste demandée après le range
+        var c2 = SuiviLot()
+        c2.envoi(a, nom: "a.pdf")
+        c2.recu(a, document: "d-a")
+        c2.envoi(b, nom: "b.pdf")
+        let ancienne = c2.lectureLancee()
+        c2.recu(b, document: "d-b")
+        c2.maj(ListeDocuments(documents: [], recents: [carte("d-a", "range")]), lecture: ancienne)
+        #expect(
+            c2.lignes == ["b.pdf — Rangement…"] && c2.enCours, "liste partie avant la réception : absence sans effet")
+        let recente = c2.lectureLancee()
+        c2.maj(
+            ListeDocuments(documents: [], recents: [carte("d-b", "range"), carte("d-a", "range")]), lecture: recente)
+        #expect(c2.confirmation(ListeDocuments(documents: []))?.texte == "2 documents rangés dans Paperless")
+        // absent d'une liste demandée APRÈS la réception : fini (comme avant)
+        var c3 = SuiviLot()
+        c3.envoi(a, nom: "a.pdf")
+        c3.recu(a, document: "d-a")
+        let apres = c3.lectureLancee()
+        c3.maj(ListeDocuments(documents: []), lecture: apres)
+        #expect(c3.lignes.isEmpty && !c3.enCours)
     }
 
     @Test(

@@ -175,6 +175,7 @@ final class Annexes {
     }
 
     private func chargerDocuments() async -> Duration {
+        let lecture = suivi.lectureLancee()
         do {
             let (statut, corps) = try await acces.lire("/docs")
             switch statut {
@@ -184,7 +185,7 @@ final class Annexes {
                 if liste.documents != documents { documents = liste.documents }
                 listeDocuments = liste
                 // 23.10 (soir) : un document du lot apparu dans les récents n'est plus « en cours » ; la confirmation suit
-                if suivi.maj(liste) { confirmer(suivi.confirmation(liste)) }
+                if suivi.maj(liste, lecture: lecture) { confirmer(suivi.confirmation(liste)) }
                 compterDocuments()
                 return liste.delaiRelecture(lotEnCours: envoiEnCours || suivi.enCours)
             case 401:
