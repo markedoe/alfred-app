@@ -243,6 +243,28 @@ struct AutomateTourTests {
         #expect(!t.occupe)
     }
 
+    @Test("Résultat d'un outil dont le relais a passé la question à Hermes : « hermes » transmis ; sinon faux")
+    func resultatRelaisHermes() throws {
+        var t = AutomateTour()
+        let depart = t.commencer(id: 1, mode: .texte("Une question"), pipeline: "p1")
+        _ = try #require(depart)
+        func resultat(_ id: String, _ r: ValeurJSON) -> [AutomateTour.Signal] {
+            let outil: ValeurJSON = .texte("script__outil_lecture")
+            let appel: ValeurJSON = ["id": .texte(id), "tool_name": outil, "tool_args": ["question": "x"]]
+            let fin: ValeurJSON = ["role": "tool_result", "tool_call_id": .texte(id), "tool_result": r]
+            let debut = t.recevoir(Self.evenement(1, "intent-progress", ["chat_log_delta": ["tool_calls": [appel]]]))
+            return Self.signaux(debut + t.recevoir(Self.evenement(1, "intent-progress", ["chat_log_delta": fin])))
+        }
+        let trouve: ValeurJSON = ["ok": true, "message": "Trouvé."]
+        let transmise: ValeurJSON = ["ok": true, "message": "Transmise.", "hermes": true]
+        let sans = resultat("m1", ["success": true, "result": trouve])
+        let avec = resultat("m2", ["success": true, "result": transmise])
+        let enveloppe = resultat("m3", ["data": ["success": true, "result": transmise], "error": false])
+        #expect(sans.last == .outilTermine(appelId: "m1", succes: true, hermes: false))
+        #expect(avec.last == .outilTermine(appelId: "m2", succes: true, hermes: true))
+        #expect(enveloppe.last == .outilTermine(appelId: "m3", succes: true, hermes: true))
+    }
+
     @Test("Coupure du lien pendant un tour : échec, tour libéré")
     func coupure() {
         var t = AutomateTour()

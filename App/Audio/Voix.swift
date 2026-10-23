@@ -16,7 +16,8 @@ protocol MoteurVoix: AnyObject {
     func lire(_ chemin: String) async
     /// Coupe la voix d'Alfred et le clip d'accueil.
     func interrompre()
-    /// Un court « Bien, Monsieur » (demande lente), coupé dès que la vraie réponse arrive.
+    /// Un court « Bien, Monsieur » (demande lente), coupé dès que la vraie réponse arrive ; jamais par-dessus une
+    /// réponse.
     func accueillir()
     /// Niveau de la voix d'Alfred (0…1), pour le noyau.
     var niveauVoix: Float { get }
@@ -45,10 +46,15 @@ final class VoixSysteme: MoteurVoix {
     // refaits si le service média d'iOS redémarre (doc d'Apple : tous les objets audio sont à recréer)
     private var capture = CaptureMicro()
     private var lecteurConversation: LecteurVoix?
+    /// L'accueil pendant une conversation, sur le moteur du micro comme la réponse (voir `LecteurAccueil`).
+    private var accueilConversation: LecteurAccueil?
     private var lecteurSeul = LecteurVoix()
     private var lecture: Task<Void, Never>?
+    /// L'accueil hors conversation : un lecteur à part (aucun traitement de la voix ne le baisse).
     private var clip: AVAudioPlayer?
     private var clips: [Int: Data] = [:]
+    /// Les mêmes clips décodés d'avance, pour le moteur du micro.
+    private var clipsDecodes: [Int: AVAudioPCMBuffer] = [:]
     private var dernierClip = 0
     private var micOuvert = false
     private let journal = Logger(subsystem: "io.github.markedoe.alfred", category: "voix")
@@ -148,19 +154,25 @@ final class VoixSysteme: MoteurVoix {
         interrompre()
         capture.arreter()
         lecteurConversation = nil
+        accueilConversation = nil
         micOuvert = false
         capture = CaptureMicro()
         lecteurSeul = LecteurVoix()
         if ouvert { surInterruption?("Le son de l’appareil a redémarré : touchez le noyau pour reprendre.") }
     }
 
-    /// Prépare les clips d'accueil du titre de la personne (Monsieur, Madame, Mademoiselle).
+    /// Prépare les clips d'accueil du titre de la personne (Monsieur, Madame, Mademoiselle), décodés d'avance pour
+    /// le moteur du micro.
     func chargerClips(titre: String?) async {
         var charges: [Int: Data] = [:]
+        var decodes: [Int: AVAudioPCMBuffer] = [:]
         for n in 1...ClipsAlfred.nombreAccueils {
-            if let d = try? await acces.telecharger(ClipsAlfred.accueil(n, titre: titre)) { charges[n] = d }
+            guard let d = try? await acces.telecharger(ClipsAlfred.accueil(n, titre: titre)) else { continue }
+            charges[n] = d
+            if let clip = LecteurAccueil.decoder(d) { decodes[n] = clip }
         }
         clips = charges
+        clipsDecodes = decodes
     }
 
     func autoriserMicro() async -> Bool {
@@ -223,15 +235,24 @@ final class VoixSysteme: MoteurVoix {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
             throw error
         }
-        lecteurConversation = LecteurVoix(moteur: capture.moteur, possedeMoteur: false)
+        let lecteurs = Self.lecteurs(moteur: capture.moteur)
+        lecteurConversation = lecteurs.reponse
+        accueilConversation = lecteurs.accueil
         micOuvert = true
         return flux
+    }
+
+    /// Les lecteurs d'une conversation, tous deux sur le moteur du micro : la réponse (le traitement de la voix la
+    /// connaît et l'ôte du micro) et l'accueil (joué à côté, il serait baissé par ce traitement).
+    nonisolated static func lecteurs(moteur: AVAudioEngine) -> (reponse: LecteurVoix, accueil: LecteurAccueil) {
+        (LecteurVoix(moteur: moteur, possedeMoteur: false), LecteurAccueil(moteur: moteur))
     }
 
     func fermerMicro() {
         interrompre()
         capture.arreter()
         lecteurConversation = nil
+        accueilConversation = nil
         micOuvert = false
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -269,15 +290,49 @@ final class VoixSysteme: MoteurVoix {
     func interrompre() {
         lecture?.cancel()
         lecture = nil
+        arreterAccueil()
+    }
+
+    private func arreterAccueil() {
         clip?.stop()
         clip = nil
+        accueilConversation?.arreter()
+    }
+
+    /// Par où passe l'accueil.
+    enum CheminAccueil: Equatable { case moteurDuMicro, lecteurAPart, aucun }
+
+    /// Rien pendant une réponse (l'accueil et la réponse ne se chevauchent jamais ; la réponse, elle, coupe l'accueil) ;
+    /// micro ouvert, le moteur du micro, celui de la réponse ; micro fermé, un lecteur à part, comme la réponse lue
+    /// hors conversation (rien ne la baisse).
+    nonisolated static func cheminAccueil(micOuvert: Bool, reponseEnCours: Bool) -> CheminAccueil {
+        if reponseEnCours { return .aucun }
+        return micOuvert ? .moteurDuMicro : .lecteurAPart
     }
 
     func accueillir() {
         let n = ClipsAlfred.prochainAccueil(apres: dernierClip, tirage: Int.random(in: 0..<ClipsAlfred.nombreAccueils))
+        switch Self.cheminAccueil(micOuvert: micOuvert, reponseEnCours: lecture != nil) {
+        case .aucun:
+            return
+        case .moteurDuMicro:
+            guard let decode = clipsDecodes[n], let accueil = accueilConversation else {
+                // un clip que l'app n'a pas su décoder : à côté, comme avant (plus bas, mais dit)
+                accueillirAPart(n)
+                return
+            }
+            arreterAccueil()
+            // moteur arrêté (matériel changé : la conversation se ferme) : rien ne sonne
+            if accueil.jouer(decode) { dernierClip = n }
+        case .lecteurAPart:
+            accueillirAPart(n)
+        }
+    }
+
+    private func accueillirAPart(_ n: Int) {
         guard let d = clips[n], let joueur = try? AVAudioPlayer(data: d, fileTypeHint: "public.mp3") else { return }
         dernierClip = n
-        clip?.stop()
+        arreterAccueil()
         clip = joueur
         joueur.play()
     }
@@ -293,7 +348,9 @@ final class VoixSysteme: MoteurVoix {
 final class VoixMuette: MoteurVoix {
     private var continuation: AsyncStream<[Float]>.Continuation?
     private(set) var lues: [String] = []
+    /// Les accueils joués ; `cheminsAccueil` : par où chacun des demandés serait passé (la règle de `VoixSysteme`).
     private(set) var accueils = 0
+    private(set) var cheminsAccueil: [VoixSysteme.CheminAccueil] = []
     var surInterruption: (@MainActor (_ motif: String?) -> Void)?
     var entreeChoisie: String?
     var entreeOubliee = false
@@ -336,6 +393,10 @@ final class VoixMuette: MoteurVoix {
         tenue?.resume()
         tenue = nil
     }
-    func accueillir() { accueils += 1 }
+    func accueillir() {
+        let chemin = VoixSysteme.cheminAccueil(micOuvert: continuation != nil, reponseEnCours: tenue != nil)
+        cheminsAccueil.append(chemin)
+        if chemin != .aucun { accueils += 1 }
+    }
     var niveauVoix: Float { 0 }
 }

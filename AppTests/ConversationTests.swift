@@ -149,6 +149,7 @@ struct ConversationTests {
         await c.basculerEcoute()
         c.recevoir(.transcrit("Cherche la recette de la fondue"))
         #expect(voix.accueils == 1)
+        #expect(voix.cheminsAccueil == [.moteurDuMicro], "micro ouvert : le moteur de la réponse")
         c.recevoir(.transcrit("Allume le salon"))
         #expect(voix.accueils == 1)
         // la conversation fermée pendant la réflexion : plus de clip (la session audio n'est plus active)
@@ -156,6 +157,26 @@ struct ConversationTests {
         c.recevoir(.transcrit("Cherche la recette de la fondue"))
         #expect(voix.accueils == 1)
         await client.arreter()
+    }
+
+    @Test("Demande lente : l'accueil ne part jamais par-dessus une réponse")
+    func accueilSansChevauchement() async throws {
+        let voix = VoixMuette()
+        _ = try voix.ouvrirMicro()
+        voix.lectureTenue = true
+        let reponse = Task { await voix.lire("/api/tts_proxy/reponse.mp3") }
+        for _ in 0..<300 {
+            if !voix.lues.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(voix.lues.count == 1)
+        voix.accueillir()
+        #expect(voix.accueils == 0 && voix.cheminsAccueil == [.aucun])
+        voix.interrompre()
+        await reponse.value
+        voix.accueillir()
+        #expect(voix.accueils == 1 && voix.cheminsAccueil == [.aucun, .moteurDuMicro])
+        voix.fermerMicro()
     }
 
     @Test("Détails techniques : un outil annoncé deux fois n'apparaît qu'une fois ; son échec se voit")
@@ -371,6 +392,22 @@ struct ConversationTests {
         c.recevoir(.outilCommence(appel))
         c.recevoir(.outilCommence(appel))
         #expect(c.attentesHermes.count == 1 && c.attentesHermes.first?.appel == "t1")
+    }
+
+    @Test("Outil de lecture dont le relais a passé la question à Hermes : l'attente démarre ; sans « hermes », rien")
+    func hermesRelaisOutil() {
+        let c = Conversation(voix: VoixMuette())
+        c.recevoir(.reflechit)
+        let sans = AppelOutil(id: "m1", nom: "script__outil_lecture", arguments: ["question": "Une question"])
+        c.recevoir(.outilCommence(sans))
+        c.recevoir(.outilTermine(appelId: "m1", succes: true))
+        #expect(c.attentesHermes.isEmpty, "l'outil a répondu : rien n'est attendu")
+        let avec = AppelOutil(id: "m2", nom: "script__outil_lecture", arguments: ["question": "Une autre question"])
+        c.recevoir(.outilCommence(avec))
+        c.recevoir(.outilTermine(appelId: "m2", succes: true, hermes: true))
+        c.recevoir(.outilTermine(appelId: "m2", succes: true, hermes: true))
+        #expect(c.attentesHermes.count == 1, "une seule attente pour cet appel")
+        #expect(c.attentesHermes.first?.appel == "m2")
     }
 
     @Test("Nouvelle conversation (déconnexion) : les attentes et réponses d'Hermes sont oubliées (23.10)")

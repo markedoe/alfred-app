@@ -29,7 +29,8 @@ public struct AutomateTour: Sendable {
         case transcrit(String)
         case reflechit
         case outilCommence(AppelOutil)
-        case outilTermine(appelId: String, succes: Bool)
+        /// `hermes` : le relais a confié la question à Hermes (outil mémoire ou e-mails qui n'a rien trouvé).
+        case outilTermine(appelId: String, succes: Bool, hermes: Bool = false)
         case fragment(String)
         case reponse(FinIntention)
         case voix(chemin: String)
@@ -157,7 +158,7 @@ public struct AutomateTour: Sendable {
                 effets.append(.signal(.outilCommence(a)))
             }
             if let r = d.resultat, outilsVus.contains(r.appelId) {
-                effets.append(.signal(.outilTermine(appelId: r.appelId, succes: r.succes)))
+                effets.append(.signal(.outilTermine(appelId: r.appelId, succes: r.succes, hermes: r.hermes)))
             }
             if let c = d.contenu { effets.append(.signal(.fragment(c))) }
             return effets

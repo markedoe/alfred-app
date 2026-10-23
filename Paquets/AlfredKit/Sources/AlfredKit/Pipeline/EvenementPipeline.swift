@@ -63,7 +63,11 @@ public struct DeltaConversation: Sendable, Equatable {
         appels = (dl["tool_calls"]?.liste ?? []).compactMap(AppelOutil.init)
         if dl["role"]?.texte == "tool_result", let id = dl["tool_call_id"]?.texte {
             // un résultat sans `success: false` est un succès (règle de la console)
-            resultat = ResultatOutil(appelId: id, succes: dl["tool_result"]?["success"]?.booleen != false)
+            let r = dl["tool_result"]
+            // la réponse d'un script : `{success, result: {…}}` ; une enveloppe `{data: …}` est lue aussi (`relaisHermes`)
+            let reponse = r?["result"] ?? r?["data"]?["result"] ?? r?["data"]
+            resultat = ResultatOutil(
+                appelId: id, succes: r?["success"]?.booleen != false, hermes: reponse?["hermes"]?.booleen == true)
         } else {
             resultat = nil
         }
@@ -133,6 +137,15 @@ public struct AppelOutil: Sendable, Equatable, Identifiable {
 public struct ResultatOutil: Sendable, Equatable {
     public let appelId: String
     public let succes: Bool
+    /// L'outil n'a rien trouvé et le relais a confié la question à Hermes (outils mémoire et e-mails, `hermes: true`) :
+    /// sa réponse arrivera plus tard, comme après `demander_hermes`.
+    public let hermes: Bool
+
+    public init(appelId: String, succes: Bool, hermes: Bool = false) {
+        self.appelId = appelId
+        self.succes = succes
+        self.hermes = hermes
+    }
 }
 
 public struct FinIntention: Sendable, Equatable {

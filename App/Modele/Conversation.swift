@@ -108,7 +108,8 @@ final class Conversation {
     }
 
     /// 22.10 (retour d'essai : « je m'attendais à ce qu'Alfred me dicte la réponse d'Hermes ») : les questions confiées
-    /// à Hermes ICI (l'outil script__demander_hermes), dans l'ordre (le relais y répond dans cet ordre, une à la fois).
+    /// à Hermes ICI (l'outil script__demander_hermes, ou un outil mémoire ou e-mails dont le relais a passé la question
+    /// à Hermes), dans l'ordre (le relais y répond dans cet ordre, une à la fois).
     /// Leurs réponses arrivent plus tard : `Annexes` les réclame au relais (toutes les 3 s pendant l'attente) et les
     /// passe à `recevoirDifferee`.
     private(set) var attentesHermes: [AttenteHermes] = []
@@ -523,9 +524,13 @@ final class Conversation {
             if appel.nomCourt.hasSuffix("demander_hermes"), !attentesHermes.contains(where: { $0.appel == appel.id }) {
                 attendreHermes(appel: appel.id)
             }
-        case .outilTermine(let id, let succes):
+        case .outilTermine(let id, let succes, let hermes):
             modifierReponse { m in
                 if let i = m.outils.firstIndex(where: { $0.id == id }) { m.outils[i].etat = succes ? .fait : .echec }
+            }
+            // l'outil mémoire ou e-mails n'a rien trouvé : le relais a confié la question à Hermes, sa réponse arrive ici
+            if hermes, !attentesHermes.contains(where: { $0.appel == id }) {
+                attendreHermes(appel: id)
             }
         case .fragment(let morceau):
             modifierReponse { $0.texte += morceau }

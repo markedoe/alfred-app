@@ -12,7 +12,8 @@ final class CaptureMicro: @unchecked Sendable {
     static let format = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
 
-    /// Le moteur du micro ; la voix d'Alfred y est jouée pendant une conversation (référence de l'annulation d'écho).
+    /// Le moteur du micro ; la voix d'Alfred y est jouée pendant une conversation, réponse et accueil (référence de
+    /// l'annulation d'écho ; joué à côté, un son serait baissé par le traitement de la voix).
     let moteur = AVAudioEngine()
     private var convertisseur: AVAudioConverter?
     private var continuation: AsyncStream<[Float]>.Continuation?

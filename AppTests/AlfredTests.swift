@@ -250,4 +250,34 @@ struct SonTests {
         #expect(!VoixSysteme.seTaire(apres: .categoryChange))
         #expect(!VoixSysteme.seTaire(apres: nil))
     }
+
+    @Test("Accueil : micro ouvert, par le moteur du micro ; micro fermé, à part ; jamais pendant une réponse")
+    func cheminAccueil() {
+        #expect(VoixSysteme.cheminAccueil(micOuvert: true, reponseEnCours: false) == .moteurDuMicro)
+        #expect(VoixSysteme.cheminAccueil(micOuvert: false, reponseEnCours: false) == .lecteurAPart)
+        #expect(VoixSysteme.cheminAccueil(micOuvert: true, reponseEnCours: true) == .aucun)
+        #expect(VoixSysteme.cheminAccueil(micOuvert: false, reponseEnCours: true) == .aucun)
+    }
+
+    /// Le défaut du 23.10 : joué à côté du traitement de la voix, l'accueil sortait plus bas que la réponse.
+    @Test("Accueil, micro ouvert : le même moteur que la réponse ; moteur arrêté, rien ne sonne et rien ne casse")
+    func accueilSurLeMoteurDuMicro() throws {
+        let moteur = AVAudioEngine()
+        let lecteurs = VoixSysteme.lecteurs(moteur: moteur)
+        #expect(lecteurs.accueil.moteurAudio === moteur)
+        #expect(lecteurs.reponse.moteurAudio === lecteurs.accueil.moteurAudio)
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1))
+        let clip = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2_400))
+        clip.frameLength = 2_400
+        // jamais démarré (seule la capture démarre ce moteur) : jouer un nœud y lèverait une exception
+        #expect(!moteur.isRunning)
+        #expect(!lecteurs.accueil.jouer(clip))
+        lecteurs.accueil.arreter()
+    }
+
+    @Test("Accueil : un clip illisible ou vide n'est pas décodé")
+    func clipIllisible() {
+        #expect(LecteurAccueil.decoder(Data("pas un clip".utf8)) == nil)
+        #expect(LecteurAccueil.decoder(Data()) == nil)
+    }
 }
