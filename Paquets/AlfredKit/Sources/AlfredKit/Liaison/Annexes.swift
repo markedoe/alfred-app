@@ -121,9 +121,30 @@ public struct ListeNotifications: Sendable, Equatable, Decodable {
 // MARK: - documents
 
 /// Un document déposé à la maison (`GET /docs`) : sa fiche, jamais son texte.
+/// 23.10 (la boîte d'arrivée) : le relais range d'abord le document dans Paperless, le résume ensuite, et donne un
+/// verdict (`statut`) : rangé, envoyé, refusé (avec son motif). Les champs nouveaux sont FACULTATIFS : face à un
+/// relais plus ancien, le statut se déduit comme l'ancienne console (`etat`, `paperless`).
 public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
     public enum Etat: Sendable, Equatable {
         case pret, enCours, erreur
+    }
+
+    /// Le verdict de la carte (23.10), dans l'ordre du cycle.
+    public enum Statut: String, Sendable, Equatable {
+        /// Lecture du document (extraction du texte) par le relais.
+        case lecture
+        /// Envoyé à Paperless, en attente de sa réponse.
+        case rangement
+        /// Rangé dans Paperless (son numéro est connu).
+        case range
+        /// Envoyé à Paperless, sans réponse lisible (le droit de lire l'état d'un dépôt manque) : rien à faire.
+        case envoye
+        /// Refusé, avec son motif : reste jusqu'à « Retirer » ou « Réessayer ».
+        case refuse
+        /// Un document de banc (essais) : jamais rangé dans Paperless.
+        case banc
+        /// Un relais plus ancien : lu et résumé, sans archivage connu.
+        case lu
     }
 
     public let id: String
@@ -136,14 +157,37 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
     public let deposeLe: String?
     /// AAAA-MM-JJ, le jour que le document concerne.
     public let pourLe: String?
-    /// Archivé dans Paperless.
+    /// Archivé (ou envoyé) dans Paperless.
     public let paperless: Bool
     /// Un passage suspect (adressé à un assistant, ou qui réclame un paiement) ; nil sinon.
     public let alerte: String?
+    /// 23.10 : le verdict tel que le relais l'écrit (nil : relais plus ancien).
+    public let statutBrut: String?
+    /// 23.10 : le motif lisible d'un refus.
+    public let motif: String?
+    /// 23.10 : la nature d'un refus (« illisible », « lecture », « paperless », « paperless_refus »,
+    /// « paperless_absent », « doublon ») ; un code inconnu reste un simple refus (le `motif` est montré tel quel).
+    public let refus: String?
+    /// 23.10 : un nouvel essai a un sens (pas pour un doublon).
+    public let reessayer: Bool
+    /// 23.10 : la fiche dans Paperless (http(s) seulement), si la personne a le droit de la voir.
+    public let lien: URL?
+    /// 23.10 : un doublon dont la fiche existante n'est pas montrée (« déjà archivé »).
+    public let dejaArchive: Bool
+    /// 23.10 : le résumé attend (« pc » : le PC d'Alfred est éteint ; « file » : son tour vient).
+    public let resumeAttente: String?
+    /// 23.10 : quand une carte rangée quitte le panneau (ISO 8601).
+    public let quitteLe: String?
+    /// 23.10 : les étiquettes du document (posées, ou en attente du rangement) et celles que Paperless n'a pas posées.
+    public let etiquettes: [String]
+    public let etiquettesNonPosees: [String]
 
     public init(
         id: String, nom: String, etat: String, resume: String? = nil, erreur: String? = nil, deposeLe: String? = nil,
-        pourLe: String? = nil, paperless: Bool = false, alerte: String? = nil
+        pourLe: String? = nil, paperless: Bool = false, alerte: String? = nil, statut: String? = nil,
+        motif: String? = nil, refus: String? = nil, reessayer: Bool = false, lien: URL? = nil,
+        dejaArchive: Bool = false, resumeAttente: String? = nil, quitteLe: String? = nil, etiquettes: [String] = [],
+        etiquettesNonPosees: [String] = []
     ) {
         self.id = id
         self.nom = nom
@@ -154,13 +198,29 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         self.pourLe = pourLe
         self.paperless = paperless
         self.alerte = alerte
+        statutBrut = statut
+        self.motif = motif
+        self.refus = refus
+        self.reessayer = reessayer
+        self.lien = Self.web(lien)
+        self.dejaArchive = dejaArchive
+        self.resumeAttente = resumeAttente
+        self.quitteLe = quitteLe
+        self.etiquettes = etiquettes
+        self.etiquettesNonPosees = etiquettesNonPosees
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, nom, resume, erreur, paperless, alerte
+        case id, nom, resume, erreur, paperless, alerte, motif, refus, reessayer, lien
+        case etiquettes
         case etatBrut = "etat"
         case deposeLe = "depose_le"
         case pourLe = "pour_le"
+        case statutBrut = "statut"
+        case etiquettesNonPosees = "etiquettes_non_posees"
+        case dejaArchive = "deja_archive"
+        case resumeAttente = "resume_attente"
+        case quitteLe = "quitte_le"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -175,6 +235,35 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         // la console : `d.paperless ? " · archivé" : ""` ; le relais y range la tâche de Paperless (un objet)
         paperless = try c.decodeIfPresent(ValeurJSON.self, forKey: .paperless).map(Self.vrai) ?? false
         alerte = try c.decodeIfPresent(String.self, forKey: .alerte)
+        // 23.10 : facultatifs, et tolérants (une valeur d'un autre type est ignorée, jamais une liste perdue)
+        statutBrut = try? c.decodeIfPresent(String.self, forKey: .statutBrut)
+        motif = try? c.decodeIfPresent(String.self, forKey: .motif)
+        refus = try? c.decodeIfPresent(String.self, forKey: .refus)
+        reessayer = (try? c.decodeIfPresent(ValeurJSON.self, forKey: .reessayer)).map(Self.vrai) ?? false
+        lien = Self.web((try? c.decodeIfPresent(String.self, forKey: .lien)).flatMap(URL.init(string:)))
+        dejaArchive = (try? c.decodeIfPresent(ValeurJSON.self, forKey: .dejaArchive)).map(Self.vrai) ?? false
+        resumeAttente = try? c.decodeIfPresent(String.self, forKey: .resumeAttente)
+        quitteLe = try? c.decodeIfPresent(String.self, forKey: .quitteLe)
+        etiquettes = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettes))
+        etiquettesNonPosees = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettesNonPosees))
+    }
+
+    /// Une liste de noms (23.10), tolérante : ce qui n'est pas un texte non vide est sauté.
+    static func textes(_ v: ValeurJSON?) -> [String] {
+        guard case .liste(let l)? = v else { return [] }
+        return l.compactMap { $0.texte.flatMap { $0.isEmpty ? nil : $0 } }
+    }
+
+    /// 23.10 : ce que la carte écrit après la date : « · étiquettes : A, B · non posée : C » (vide sans étiquette).
+    public var texteEtiquettes: String {
+        var t = ""
+        if !etiquettes.isEmpty { t += " · étiquettes : " + etiquettes.joined(separator: ", ") }
+        if !etiquettesNonPosees.isEmpty {
+            t +=
+                (etiquettesNonPosees.count > 1 ? " · non posées : " : " · non posée : ")
+                + etiquettesNonPosees.joined(separator: ", ")
+        }
+        return t
     }
 
     /// Une valeur « vraie » au sens de JavaScript (la console teste le champ tel quel).
@@ -188,6 +277,12 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         }
     }
 
+    /// Un lien vers Paperless : une adresse http(s) seulement (rien d'autre ne s'ouvre d'ici, comme les liens).
+    static func web(_ u: URL?) -> URL? {
+        guard let u, ["http", "https"].contains(u.scheme?.lowercased()), u.host != nil else { return nil }
+        return u
+    }
+
     /// Comme la console : « pret », « erreur », tout le reste « en cours ».
     public var etat: Etat {
         switch etatBrut {
@@ -196,19 +291,364 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         default: .enCours
         }
     }
+
+    /// Le verdict (23.10) : celui du relais ; sans lui (relais plus ancien, ou valeur inconnue), déduit comme l'ancienne
+    /// console — prêt et archivé : rangé ; prêt : lu ; erreur : refusé (motif : l'erreur) ; le reste : en lecture.
+    public var statut: Statut {
+        if let s = statutBrut.flatMap(Statut.init(rawValue:)), s != .lu { return s }
+        switch etat {
+        case .pret: return paperless ? .range : .lu
+        case .erreur: return .refuse
+        case .enCours: return .lecture
+        }
+    }
+
+    /// La carte demande une action, ou attend encore (la pastille de l'en-tête) : en lecture, en rangement, refusée.
+    public var aTraiter: Bool { [.lecture, .rangement, .refuse].contains(statut) }
+
+    /// L'état écrit sur la carte, les mots de la console ; nil pour un document lu par un relais plus ancien (la carte
+    /// montre alors son résumé seul, comme avant).
+    public var texteEtat: String? {
+        let attente: String =
+            switch resumeAttente {
+            case "pc": " — résumé quand le PC d’Alfred sera allumé"
+            case "file": " — résumé en cours…"
+            default: ""
+            }
+        switch statut {
+        case .lecture: return "Lecture en cours…"
+        case .rangement: return "Rangement dans Paperless…"
+        case .range: return "Rangé dans Paperless" + attente
+        case .envoye: return "Envoyé à Paperless" + attente
+        case .refuse: return "Refusé : " + motifRefus
+        case .banc: return "Lu (banc : pas rangé dans Paperless)"
+        case .lu: return nil
+        }
+    }
+
+    /// Le motif d'un refus : celui du relais, sinon l'erreur de lecture (relais plus ancien).
+    public var motifRefus: String {
+        if let m = motif?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty { return m }
+        if refus == "doublon" { return "déjà dans Paperless" }
+        if let e = erreur?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty {
+            return "lecture impossible (\(e))"
+        }
+        return "lecture impossible"
+    }
+
+    /// Le résumé à montrer sous l'état : jamais pendant la lecture ; celui du relais sinon.
+    public var resumeAffiche: String? {
+        guard statut != .lecture, let r = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else {
+            return nil
+        }
+        return r
+    }
+
+    /// Les boutons d'une carte (23.10) : « Réessayer » et « Retirer » sur un refus, « Supprimer » sur un document que
+    /// Paperless n'a pas (banc, ou lu par un relais plus ancien) ; plus jamais « Supprimer » sur un document rangé.
+    public var peutReessayer: Bool { statut == .refuse && reessayer }
+    public var peutRetirer: Bool { statut == .refuse }
+    public var peutSupprimer: Bool { statut == .banc || statut == .lu }
+
+    /// L'identifiant dans un chemin : « / » échappé aussi (il ne doit jamais viser une autre route).
+    public static func segment(_ id: String) -> String {
+        var permis = CharacterSet.urlPathAllowed
+        permis.remove("/")
+        return id.addingPercentEncoding(withAllowedCharacters: permis) ?? id
+    }
+
+    /// 23.10 : un nouvel essai d'un document refusé (`POST /docs/<id>/reessayer`, corps vide).
+    public var requeteReessayer: RequeteRelais { RequeteRelais(.post, "/docs/" + Self.segment(id) + "/reessayer") }
+
+    /// « Retirer » (un refus) ou « Supprimer » (banc) : `DELETE /docs/<id>`.
+    public var requeteRetirer: RequeteRelais { RequeteRelais(.delete, "/docs/" + Self.segment(id)) }
 }
 
 public struct ListeDocuments: Sendable, Equatable, Decodable {
     public let documents: [DocumentMaison]
+    /// 23.10 : ce qui demande une action ou attend (en cours, refusés), selon le relais ; nil : relais plus ancien.
+    public let aTraiter: Int?
+    /// 23.10 : les fiches gardées à la maison mais hors du panneau (rangées depuis plus de 24 h).
+    public let horsPanneau: Int?
 
-    public init(documents: [DocumentMaison]) { self.documents = documents }
+    public init(documents: [DocumentMaison], aTraiter: Int? = nil, horsPanneau: Int? = nil) {
+        self.documents = documents
+        self.aTraiter = aTraiter
+        self.horsPanneau = horsPanneau
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         documents = try c.decodeIfPresent([DocumentMaison].self, forKey: .documents) ?? []
+        aTraiter = try? c.decodeIfPresent(Int.self, forKey: .aTraiter)
+        horsPanneau = try? c.decodeIfPresent(Int.self, forKey: .horsPanneau)
     }
 
-    enum CodingKeys: String, CodingKey { case documents }
+    enum CodingKeys: String, CodingKey {
+        case documents
+        case aTraiter = "a_traiter"
+        case horsPanneau = "hors_panneau"
+    }
+
+    /// La pastille de l'en-tête (23.10) : ce que le relais compte à traiter (sinon les cartes en lecture, en rangement
+    /// ou refusées), plus les refus de l'appareil (trop lourd, type), qui n'ont jamais quitté l'app.
+    public func pastille(refusLocaux: Int = 0) -> Int {
+        max(0, aTraiter ?? documents.filter(\.aTraiter).count) + refusLocaux
+    }
+
+    /// Le rythme de relecture de la console (23.10) : 2,5 s tant qu'une carte est en lecture ou en rangement, 10 s si
+    /// un résumé est en file, 30 s si un résumé attend le PC (il s'affiche peu après son retour), sinon 60 s.
+    public var delaiRelecture: Duration {
+        if documents.contains(where: { [.lecture, .rangement].contains($0.statut) }) { return .milliseconds(2500) }
+        if documents.contains(where: { $0.resumeAttente == "file" }) { return .seconds(10) }
+        if documents.contains(where: { $0.resumeAttente == "pc" }) { return .seconds(30) }
+        return .seconds(60)
+    }
+}
+
+// MARK: - étiquettes (23.10)
+
+/// Une étiquette de Paperless proposée au dépôt (`GET /docs/etiquettes`).
+public struct EtiquetteDocument: Sendable, Equatable, Hashable, Identifiable, Decodable {
+    public let id: Int
+    public let nom: String
+
+    public init(id: Int, nom: String) {
+        self.id = id
+        self.nom = nom
+    }
+}
+
+/// La liste des étiquettes (`GET /docs/etiquettes`), triée par nom, sans les étiquettes techniques ; `disponible` faux :
+/// Paperless ne répond pas (liste vide, un nom nouveau reste possible).
+public struct ListeEtiquettes: Sendable, Equatable, Decodable {
+    public let etiquettes: [EtiquetteDocument]
+    public let disponible: Bool
+
+    public init(etiquettes: [EtiquetteDocument], disponible: Bool) {
+        self.etiquettes = etiquettes
+        self.disponible = disponible
+    }
+
+    enum CodingKeys: String, CodingKey { case etiquettes, disponible }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // une entrée mal formée est sautée, jamais toute la liste
+        let brutes = (try? c.decodeIfPresent([ValeurJSON].self, forKey: .etiquettes)) ?? []
+        etiquettes = brutes.compactMap { v in
+            guard case .nombre(let n)? = v["id"], n == n.rounded(), let nom = v["nom"]?.texte, !nom.isEmpty else {
+                return nil
+            }
+            return EtiquetteDocument(id: Int(n), nom: nom)
+        }
+        disponible = (try? c.decodeIfPresent(Bool.self, forKey: .disponible)) ?? false
+    }
+}
+
+/// Une étiquette choisie au dépôt : une de la liste (son n° part au relais), ou une nouvelle (son nom nettoyé ; le
+/// relais la crée au rangement, sans doublon).
+public enum ChoixEtiquette: Sendable, Equatable, Hashable, Identifiable {
+    case existante(EtiquetteDocument)
+    case nouvelle(String)
+
+    public var nom: String {
+        switch self {
+        case .existante(let e): e.nom
+        case .nouvelle(let n): n
+        }
+    }
+
+    /// La valeur du champ `etiquette` : le n° en décimal, ou le nom.
+    public var valeur: String {
+        switch self {
+        case .existante(let e): String(e.id)
+        case .nouvelle(let n): n
+        }
+    }
+
+    public var id: String { Etiquettes.cle(nom) }
+}
+
+/// Une ligne de la liste de propositions sous le champ « Ajouter une étiquette… ».
+public enum PropositionEtiquette: Sendable, Equatable, Identifiable {
+    case existante(EtiquetteDocument)
+    /// « Nouvelle étiquette : <nom> » (toujours la dernière).
+    case nouvelle(String)
+
+    public var texte: String {
+        switch self {
+        case .existante(let e): e.nom
+        case .nouvelle(let n): "Nouvelle étiquette : " + n
+        }
+    }
+
+    public var choix: ChoixEtiquette {
+        switch self {
+        case .existante(let e): .existante(e)
+        case .nouvelle(let n): .nouvelle(n)
+        }
+    }
+
+    public var id: String { texte }
+}
+
+/// Les règles des étiquettes, les mêmes que la console et le relais (23.10).
+public enum Etiquettes {
+    /// 10 étiquettes au plus par dépôt (le relais refuse au-delà).
+    public static let max = 10
+    /// 8 propositions au plus sous le champ.
+    public static let maxPropositions = 8
+    /// 40 caractères au plus pour un nom.
+    public static let longueurMax = 40
+
+    /// Un nom tapé, nettoyé comme le relais : NFC ; caractère de contrôle, de format (invisible) ou séparateur → espace ;
+    /// espaces réduits, bords retirés ; 40 caractères au plus ; nil s'il ne reste rien.
+    public static func nettoyer(_ s: String) -> String? {
+        var sortie = String.UnicodeScalarView()
+        for u in s.precomposedStringWithCanonicalMapping.unicodeScalars {
+            switch u.properties.generalCategory {
+            case .control, .format, .spaceSeparator, .lineSeparator, .paragraphSeparator:
+                sortie.append(" ")
+            default:
+                sortie.append(u)
+            }
+        }
+        let mots = String(sortie).split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        // 40 points de code, comme le relais (Python compte les points de code, pas les caractères affichés)
+        let coupe = String(String.UnicodeScalarView(mots.unicodeScalars.prefix(longueurMax)))
+        let propre = coupe.trimmingCharacters(in: .whitespaces)
+        return propre.isEmpty ? nil : propre
+    }
+
+    /// La clé de comparaison : sans casse ni accents (« Électricité » = « electricite »).
+    public static func cle(_ s: String) -> String {
+        let sansAccents = s.decomposedStringWithCanonicalMapping.unicodeScalars.filter {
+            $0.properties.generalCategory != .nonspacingMark
+        }
+        return String(String.UnicodeScalarView(sansAccents)).lowercased()
+    }
+
+    /// Les propositions pour une saisie : les étiquettes dont le nom, ou l'un de ses mots, commence par la saisie (sans
+    /// casse ni accents), celles déjà choisies exclues, 8 au plus ; puis « Nouvelle étiquette : <nom> » si la saisie
+    /// nettoyée ne correspond à aucune étiquette de la liste (ni à une nouvelle déjà choisie). Saisie vide (le champ
+    /// touché, rien de tapé) : les 8 premières, dans l'ordre du relais, sans « Nouvelle étiquette ».
+    public static func propositions(
+        _ saisie: String, liste: [EtiquetteDocument], choisies: [ChoixEtiquette]
+    ) -> [PropositionEtiquette] {
+        let prises = Set(choisies.map(\.id))
+        guard let propre = nettoyer(saisie) else {
+            return liste.filter { !prises.contains(cle($0.nom)) }.prefix(maxPropositions).map(
+                PropositionEtiquette.existante)
+        }
+        let q = cle(propre)
+        let trouvees = liste.filter { e in
+            guard !prises.contains(cle(e.nom)) else { return false }
+            let k = cle(e.nom)
+            return k.hasPrefix(q)
+                || k.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.hasPrefix(q) }
+        }
+        var out = trouvees.prefix(maxPropositions).map(PropositionEtiquette.existante)
+        if !liste.contains(where: { cle($0.nom) == q }), !prises.contains(q) { out.append(.nouvelle(propre)) }
+        return out
+    }
+
+    /// Ce que la touche Retour choisit : l'étiquette de la liste qui porte exactement ce nom (sans casse ni accents),
+    /// sinon une nouvelle ; nil pour une saisie vide ou déjà choisie.
+    public static func choixDirect(
+        _ saisie: String, liste: [EtiquetteDocument], choisies: [ChoixEtiquette]
+    )
+        -> ChoixEtiquette?
+    {
+        guard let propre = nettoyer(saisie) else { return nil }
+        let q = cle(propre)
+        guard !choisies.contains(where: { $0.id == q }) else { return nil }
+        if let e = liste.first(where: { cle($0.nom) == q }) { return .existante(e) }
+        return .nouvelle(propre)
+    }
+}
+
+/// 23.10 : un bouton en deux temps (« Retirer », « Supprimer ») : le premier toucher ARME l'action pour ce document
+/// pendant 3,5 s, le second, dans ce délai, la confirme. Gardé hors de la carte (dans les annexes) : une relecture de la
+/// liste (toutes les 2,5 s pendant qu'un autre fichier du lot est lu) ne le remet jamais à zéro. Une seule action armée
+/// à la fois : en armer une autre désarme la précédente.
+public struct DeuxTemps: Sendable, Equatable {
+    public static let delai: TimeInterval = 3.5
+
+    struct Arme: Sendable, Equatable {
+        let action: String
+        let id: String
+        let jusqua: Date
+    }
+
+    private(set) var arme: Arme?
+
+    public init() {}
+
+    /// Un toucher : true s'il CONFIRME l'action armée (même action, même document, dans le délai) ; sinon il l'arme et
+    /// rend false.
+    public mutating func toucher(_ action: String, id: String, maintenant: Date = .now) -> Bool {
+        if estArme(action, id: id, maintenant: maintenant) {
+            arme = nil
+            return true
+        }
+        arme = Arme(action: action, id: id, jusqua: maintenant.addingTimeInterval(Self.delai))
+        return false
+    }
+
+    public func estArme(_ action: String, id: String, maintenant: Date = .now) -> Bool {
+        guard let arme else { return false }
+        return arme.action == action && arme.id == id && maintenant < arme.jusqua
+    }
+
+    /// Le délai passé : plus rien d'armé (la carte redevient « Retirer » ou « Supprimer »).
+    public mutating func expirer(maintenant: Date = .now) {
+        if let a = arme, maintenant >= a.jusqua { arme = nil }
+    }
+}
+
+/// 23.10 : un fichier refusé AVANT tout envoi, ou par le relais au dépôt (413, 415) : une carte de l'app seule (rien
+/// n'est gardé à la maison), jusqu'à « Retirer ».
+public struct RefusLocal: Sendable, Equatable, Identifiable {
+    public enum Motif: Sendable, Equatable {
+        case taille, type
+        /// 23.10 : un refus du relais (400) avec son texte lisible (étiquette inconnue, nom réservé…).
+        case relais(String)
+    }
+
+    public let id: UUID
+    public let nom: String
+    public let motif: Motif
+
+    public init(nom: String, motif: Motif, id: UUID = UUID()) {
+        self.id = id
+        self.nom = nom
+        self.motif = motif
+    }
+
+    /// Le refus d'un dépôt d'après le code du relais : 413 (trop lourd), 415 (type), 400 avec un texte (23.10 : une
+    /// étiquette refusée) ; nil pour toute autre réponse.
+    public init?(nom: String, statut: Int, corps: Data = Data()) {
+        switch statut {
+        case 413: self.init(nom: nom, motif: .taille)
+        case 415: self.init(nom: nom, motif: .type)
+        case 400:
+            let texte = String(decoding: corps.prefix(300), as: UTF8.self).trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            guard !texte.isEmpty else { return nil }
+            self.init(nom: nom, motif: .relais(texte))
+        default: return nil
+        }
+    }
+
+    /// Les mots de la console.
+    public var texte: String {
+        switch motif {
+        case .taille: "Refusé : trop lourd (20 Mo au plus)"
+        case .type: "Refusé : type non pris en charge (PDF, image, texte ou e-mail)"
+        case .relais(let t): "Refusé : " + t
+        }
+    }
 }
 
 /// Le dépôt d'un document (`POST /docs`) : un corps multipart, comme le `FormData` de la console (« fichier »,
@@ -222,12 +662,16 @@ public struct DepotDocument: Sendable, Equatable {
     public let type: String
     /// AAAA-MM-JJ.
     public let pourLe: String?
+    /// 23.10 : les étiquettes du dépôt, chacune un champ `etiquette` : le n° d'une étiquette de la liste, ou le nom
+    /// (nettoyé) d'une nouvelle ; 10 au plus.
+    public let etiquettes: [String]
 
-    public init(fichier: Data, nomFichier: String, type: String, pourLe: String? = nil) {
+    public init(fichier: Data, nomFichier: String, type: String, pourLe: String? = nil, etiquettes: [String] = []) {
         self.fichier = fichier
         self.nomFichier = nomFichier
         self.type = type
         self.pourLe = pourLe
+        self.etiquettes = Array(etiquettes.prefix(Etiquettes.max))
     }
 
     /// Le nom lisible, comme la console : sans extension, tirets et soulignés en espaces.
@@ -239,7 +683,10 @@ public struct DepotDocument: Sendable, Equatable {
     /// La requête, avec une frontière tirée au hasard (absente du fichier, vérifié).
     public func requete(frontiere: String = "alfred-" + UUID().uuidString) -> RequeteRelais {
         var f = frontiere
-        while fichier.range(of: Data(f.utf8)) != nil { f += "-" + UUID().uuidString.prefix(8) }
+        // ni dans le fichier, ni dans une étiquette (23.10)
+        while fichier.range(of: Data(f.utf8)) != nil || etiquettes.contains(where: { $0.contains(f) }) {
+            f += "-" + UUID().uuidString.prefix(8)
+        }
         return RequeteRelais(.post, "/docs", corps: corps(frontiere: f), type: "multipart/form-data; boundary=\(f)")
     }
 
@@ -260,6 +707,8 @@ public struct DepotDocument: Sendable, Equatable {
         ligne("")
         champ("nom", Self.echapper(nom))
         if let pourLe { champ("pour_le", pourLe) }
+        // 23.10 : un champ par étiquette, sans retour à la ligne (le nettoyage les retire déjà)
+        for e in etiquettes { champ("etiquette", Self.echapper(e)) }
         ligne("--\(frontiere)--")
         return d
     }
@@ -268,6 +717,42 @@ public struct DepotDocument: Sendable, Equatable {
     static func echapper(_ s: String) -> String {
         s.replacingOccurrences(of: "\"", with: "%22").replacingOccurrences(of: "\r", with: "%0D")
             .replacingOccurrences(of: "\n", with: "%0A")
+    }
+}
+
+/// 23.10 : un lot de documents choisis d'un coup (photothèque, fichiers) : « Pour le », lu une fois au choix, vaut pour
+/// tout le lot ; les fichiers partent l'un après l'autre (une requête chacun, comme la console), un seul en mémoire.
+public struct LotDepot: Sendable, Equatable {
+    /// AAAA-MM-JJ, ou nil.
+    public let pourLe: String?
+    public let total: Int
+    /// 23.10 : les étiquettes du lot (valeurs des champs `etiquette`), les mêmes pour chaque fichier.
+    public let etiquettes: [String]
+
+    public init(pourLe: String?, total: Int, etiquettes: [String] = []) {
+        self.pourLe = pourLe
+        self.total = total
+        self.etiquettes = etiquettes
+    }
+
+    /// Le dépôt d'un fichier du lot, avec le jour et les étiquettes du lot.
+    public func depot(fichier: Data, nomFichier: String, type: String) -> DepotDocument {
+        DepotDocument(fichier: fichier, nomFichier: nomFichier, type: type, pourLe: pourLe, etiquettes: etiquettes)
+    }
+
+    /// La ligne d'état pendant l'envoi : « Envoi de devis.pdf… », « Envoi de devis.pdf (2 sur 3)… ».
+    public func etatEnvoi(_ nom: String, rang: Int) -> String {
+        total > 1 ? "Envoi de \(nom) (\(rang) sur \(total))…" : "Envoi de \(nom)…"
+    }
+
+    /// La ligne d'état une fois le lot reçu : « Reçu. Alfred le lit… », « 3 reçus. Alfred les lit… » ; nil si rien n'est
+    /// parti.
+    public static func recus(_ n: Int) -> String? {
+        switch n {
+        case ..<1: nil
+        case 1: "Reçu. Alfred le lit…"
+        default: "\(n) reçus. Alfred les lit…"
+        }
     }
 }
 

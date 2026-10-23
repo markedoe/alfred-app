@@ -87,24 +87,34 @@ struct Fenetre<Contenu: View>: View {
 
 // MARK: - documents
 
-/// La fenêtre « Documents » : déposer un document (photothèque, scanner, fichiers), le jour qu'il concerne, et la
-/// liste des documents déposés (leur fiche : résumé, alerte, archivage), chacun supprimable en deux temps.
+/// La fenêtre « Documents » : déposer un ou plusieurs documents (photothèque, scanner, fichiers), le jour qu'ils
+/// concernent, et la boîte d'arrivée (23.10) : une carte par fichier, en lecture, rangée dans Paperless (24 h, puis
+/// elle quitte le panneau ; la fiche reste à la maison) ou refusée avec son motif (« Réessayer », « Retirer »).
 struct FenetreDocuments: View {
     @Environment(Alfred.self) private var alfred
     let fermer: () -> Void
     /// Le jour que le document concerne : aucun par défaut (le champ vide de la console).
     @State private var avecJour = false
     @State private var jour = Calendar.current.startOfDay(for: .now)
+    /// 23.10 : les étiquettes du prochain dépôt (aucune par défaut), vidées une fois le lot envoyé.
+    @State private var etiquettes: [ChoixEtiquette] = []
 
     var body: some View {
         Fenetre(titre: "Documents", fermer: fermer) {
             VStack(alignment: .leading, spacing: 10) {
-                Depot(jour: avecJour ? jour : nil)
+                Depot(jour: avecJour ? jour : nil, etiquettes: $etiquettes)
                 quand
+                // un relais plus ancien ne connaît pas les étiquettes : le champ n'apparaît pas
+                if alfred.annexes?.etiquettes != nil {
+                    ChampEtiquettes(choisies: $etiquettes)
+                }
                 liste
             }
         }
-        .onAppear { alfred.annexes?.relireDocuments() }
+        .onAppear {
+            alfred.annexes?.relireDocuments()
+            alfred.annexes?.relireEtiquettes()
+        }
         .onDisappear { alfred.annexes?.oublierErreurDepot() }
     }
 
@@ -160,11 +170,17 @@ struct FenetreDocuments: View {
 
     @ViewBuilder private var liste: some View {
         let annexes = alfred.annexes
+        let refus = annexes?.refusLocaux ?? []
         if case .reserve(let texte)? = annexes?.accesDocuments {
             Text(texte).font(.caption).foregroundStyle(Color(.texteSecondaire))
-        } else if let docs = annexes?.documents, !docs.isEmpty {
+        } else if let docs = annexes?.documents, !docs.isEmpty || !refus.isEmpty {
             VStack(spacing: 8) {
-                ForEach(docs.prefix(12)) { d in
+                // 23.10 : les refus de l'appareil (trop lourd, type) d'abord : rien n'est parti à la maison
+                ForEach(refus) { r in
+                    CarteRefusLocal(refus: r)
+                }
+                // 23.10 : 30 cartes au plus, comme la console (un lot de plus de 12 fichiers n'en masque aucun)
+                ForEach(docs.prefix(30)) { d in
                     CarteDocument(document: d)
                 }
             }
@@ -175,13 +191,16 @@ struct FenetreDocuments: View {
     }
 }
 
-/// Un document déposé (`.doc`) : son nom, sa date (et le jour qu'il concerne, son archivage), son résumé ou son état ;
-/// la bordure est sodium pendant la lecture, rouge en cas d'échec.
+/// Un document déposé (`.doc`) : son nom, sa date (et le jour qu'il concerne), son verdict (23.10 : lecture,
+/// rangement, rangé, envoyé, refusé), son résumé ; la bordure est sodium pendant la lecture et le rangement, rouge pour
+/// un refus. Boutons : « ouvrir dans Paperless » (si la maison donne le lien), « Réessayer » et « Retirer » (en deux
+/// temps) sur un refus, « Supprimer » en deux temps sur un document que Paperless n'a pas (banc) ; plus de « Supprimer »
+/// sur un document rangé (il quitte le panneau seul après 24 h, sa fiche reste à la maison).
 private struct CarteDocument: View {
     @Environment(Alfred.self) private var alfred
+    @Environment(\.openURL) private var ouvrir
     let document: DocumentMaison
-    @State private var arme = false
-    @State private var suppression = false
+    @State private var occupe = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -194,34 +213,35 @@ private struct CarteDocument: View {
                     Text(meta).font(.caption2).foregroundStyle(Color(.texteSecondaire))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // le cadre et la cible DANS le libellé : hors du bouton, seule la surface du texte se touchait
-                Button {
-                    supprimer()
-                } label: {
-                    Text(arme ? "Confirmer" : "Supprimer")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(arme ? Color(red: 1, green: 210 / 255, blue: 201 / 255) : Color(.glace))
-                        .padding(.horizontal, 8)
-                        .frame(minHeight: 30)
-                        .background(Console.bouton, in: .rect(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8).strokeBorder(
-                                arme ? Self.rouge : Color(.acier), lineWidth: 1.5)
-                        )
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(.rect)
+                let arme = alfred.annexes?.deuxTemps.estArme("supprimer", id: document.id) == true
+                if document.peutSupprimer {
+                    // le cadre et la cible DANS le libellé : hors du bouton, seule la surface du texte se touchait
+                    Button {
+                        enDeuxTemps("supprimer") { await alfred.annexes?.supprimer(document) }
+                    } label: {
+                        Self.etiquette(arme ? "Confirmer" : "Supprimer", rouge: arme)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(occupe)
+                    .accessibilityLabel(
+                        arme ? "Confirmer : supprimer \(document.nom)" : "Supprimer \(document.nom)")
                 }
-                .buttonStyle(.plain)
-                .disabled(suppression)
-                .accessibilityLabel(
-                    arme ? "Confirmer la suppression de \(document.nom)" : "Supprimer \(document.nom)")
+            }
+            if let etat = document.texteEtat {
+                Text(etat)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(couleurEtat)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("etatDocument")
             }
             // le résumé du relais tient en trois lignes (sa consigne) : jamais coupé, à toutes les tailles de texte
-            Text(resume)
-                .font(.caption)
-                .foregroundStyle(Color(red: 201 / 255, green: 216 / 255, blue: 228 / 255))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+            if let resume = document.resumeAffiche {
+                Text(resume)
+                    .font(.caption)
+                    .foregroundStyle(Color(red: 201 / 255, green: 216 / 255, blue: 228 / 255))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if document.alerte != nil {
                 Text("Passage suspect : il s’adresse à un assistant. Alfred et Hermes ne le suivront pas.")
                     .font(.caption)
@@ -230,6 +250,7 @@ private struct CarteDocument: View {
                     .padding(.leading, 8)
                     .overlay(alignment: .leading) { Rectangle().fill(Self.rouge).frame(width: 3) }
             }
+            actions
         }
         .padding(.leading, 12)
         .padding([.vertical, .trailing], 10)
@@ -239,50 +260,239 @@ private struct CarteDocument: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Le lien vers Paperless, « déjà archivé », « Réessayer », « Retirer ».
+    @ViewBuilder private var actions: some View {
+        let lien = document.lien
+        if lien != nil || document.dejaArchive || document.peutReessayer || document.peutRetirer {
+            HStack(spacing: 8) {
+                if let lien {
+                    Button {
+                        ouvrir(lien)
+                    } label: {
+                        Self.etiquette("ouvrir dans Paperless")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Ouvrir \(document.nom) dans Paperless")
+                    .accessibilityHint("S’ouvre dans Safari")
+                } else if document.dejaArchive {
+                    Text("déjà archivé").font(.caption).foregroundStyle(Color(.texteSecondaire))
+                }
+                if document.peutReessayer {
+                    Button {
+                        agir { await alfred.annexes?.reessayer(document) }
+                    } label: {
+                        Self.etiquette("Réessayer")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(occupe)
+                    .accessibilityLabel("Réessayer \(document.nom)")
+                }
+                if document.peutRetirer {
+                    let arme = alfred.annexes?.deuxTemps.estArme("retirer", id: document.id) == true
+                    Button {
+                        enDeuxTemps("retirer") { await alfred.annexes?.retirer(document) }
+                    } label: {
+                        Self.etiquette(arme ? "Confirmer" : "Retirer", rouge: arme)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(occupe)
+                    .accessibilityLabel(
+                        arme ? "Confirmer : retirer \(document.nom)" : "Retirer \(document.nom)"
+                    )
+                    .accessibilityHint("Le document refusé quitte la maison")
+                }
+            }
+        }
+    }
+
     static let rouge = Color(red: 216 / 255, green: 106 / 255, blue: 90 / 255)
+    static let roseRefus = Color(red: 1, green: 210 / 255, blue: 201 / 255)
+
+    /// Un petit bouton de carte (`.doc-del`) : 30 pt de haut, sa cible de 44 pt au moins.
+    static func etiquette(_ texte: String, rouge: Bool = false) -> some View {
+        Text(texte)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(rouge ? roseRefus : Color(.glace))
+            .padding(.horizontal, 8)
+            .frame(minHeight: 30)
+            .background(Console.bouton, in: .rect(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(rouge ? Self.rouge : Color(.acier), lineWidth: 1.5))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(.rect)
+    }
 
     private var bordure: Color {
-        switch document.etat {
-        case .pret: Color(.trait)
-        case .enCours: Color(.sodium)
-        case .erreur: Self.rouge
+        switch document.statut {
+        case .lecture, .rangement: Color(.sodium)
+        case .refuse: Self.rouge
+        case .range, .envoye, .banc, .lu: Color(.trait)
         }
     }
 
-    private var resume: String {
-        switch document.etat {
-        case .pret: document.resume ?? ""
-        case .erreur: "Lecture impossible : " + (document.erreur ?? "")
-        case .enCours: "Lecture en cours…"
+    private var couleurEtat: Color {
+        switch document.statut {
+        case .refuse: Self.roseRefus
+        case .lecture, .rangement: Color(.sodium)
+        case .range, .envoye, .banc, .lu: Color(.sarcelle)
         }
     }
 
-    /// « dim. 18 oct. · pour ven. 31 oct. · archivé » (la console : `docDate`).
+    /// « dim. 18 oct. · pour ven. 31 oct. » (la console : `docDate`).
     private var meta: String {
         var parties: [String] = []
         if let d = document.deposeLe.flatMap(DateDocument.lire) { parties.append(DateDocument.texte(d)) }
         var texte = parties.joined()
         if let p = document.pourLe.flatMap(DateDocument.lire) { texte += " · pour " + DateDocument.texte(p) }
-        if document.paperless { texte += " · archivé" }
-        return texte
+        return texte + document.texteEtiquettes
     }
 
-    /// La console : un premier toucher arme (« Confirmer », 3,5 s), le second supprime.
-    private func supprimer() {
-        guard arme else {
-            arme = true
-            Task {
-                try? await Task.sleep(for: .seconds(3.5))
-                arme = false
-            }
-            return
-        }
-        suppression = true
+    private func agir(_ action: @escaping @MainActor () async -> Void) {
+        occupe = true
         Task {
-            await alfred.annexes?.supprimer(document)
-            suppression = false
-            arme = false
+            await action()
+            occupe = false
         }
+    }
+
+    /// La console : un premier toucher arme (« Confirmer », 3,5 s), le second agit (supprimer, et retirer depuis le
+    /// 23.10). L'état armé vit dans les annexes (`DeuxTemps`), pas dans la carte : il survit aux relectures de la liste.
+    private func enDeuxTemps(_ action: String, _ faire: @escaping @MainActor () async -> Void) {
+        guard alfred.annexes?.toucherEnDeuxTemps(action, document) == true else { return }
+        agir(faire)
+    }
+}
+
+/// 23.10 (« on doit pouvoir mettre un tag quand on upload ») : les étiquettes du prochain dépôt, comme la console —
+/// les puces choisies (chacune retirable), le champ « Ajouter une étiquette… » et ses propositions (premières lettres
+/// du nom ou d'un de ses mots, sans casse ni accents, 8 au plus, puis « Nouvelle étiquette : <nom> » ; le champ touché
+/// sans rien taper : les 8 premières) ; 10 au plus.
+private struct ChampEtiquettes: View {
+    @Environment(Alfred.self) private var alfred
+    @Binding var choisies: [ChoixEtiquette]
+    @State private var saisie = ""
+    /// Le champ touché : la liste s'ouvre, saisie vide comprise (les 8 premières), comme la console.
+    @FocusState private var focus: Bool
+
+    var body: some View {
+        let liste = alfred.annexes?.etiquettes
+        let propositions = Etiquettes.propositions(saisie, liste: liste?.etiquettes ?? [], choisies: choisies)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Étiquettes").font(.caption).foregroundStyle(Color(.texteSecondaire))
+            if !choisies.isEmpty {
+                FluxPastilles(espacement: 6, interligne: 6) {
+                    ForEach(choisies) { c in
+                        Puce(nom: c.nom) { choisies.removeAll { $0 == c } }
+                    }
+                }
+            }
+            if choisies.count < Etiquettes.max {
+                TextField("Ajouter une étiquette…", text: $saisie)
+                    .focused($focus)
+                    .font(.caption)
+                    .foregroundStyle(Color(.texte))
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if let c = Etiquettes.choixDirect(saisie, liste: liste?.etiquettes ?? [], choisies: choisies) {
+                            ajouter(c)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 44)
+                    .background(Color(red: 14 / 255, green: 34 / 255, blue: 51 / 255), in: .rect(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.trait), lineWidth: 1.5))
+                    .accessibilityLabel("Ajouter une étiquette")
+                    .accessibilityIdentifier("etiquette")
+                if (focus || !saisie.isEmpty) && !propositions.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(propositions) { p in
+                            Button {
+                                ajouter(p.choix)
+                            } label: {
+                                Text(p.texte)
+                                    .font(.caption)
+                                    .foregroundStyle(Color(.glace))
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .padding(.horizontal, 8)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .background(Color(red: 12 / 255, green: 27 / 255, blue: 40 / 255), in: .rect(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(.acier), lineWidth: 1))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Propositions d’étiquettes")
+                }
+            }
+            if liste?.disponible == false {
+                Text("Liste des étiquettes indisponible : un nom nouveau sera vérifié au rangement.")
+                    .font(.caption)
+                    .foregroundStyle(Color(.texteSecondaire))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func ajouter(_ c: ChoixEtiquette) {
+        if choisies.count < Etiquettes.max, !choisies.contains(where: { $0.id == c.id }) { choisies.append(c) }
+        saisie = ""
+    }
+
+    /// Une étiquette choisie : son nom et sa croix (« Retirer l'étiquette <nom> »).
+    private struct Puce: View {
+        let nom: String
+        let retirer: () -> Void
+
+        var body: some View {
+            HStack(spacing: 2) {
+                Text(nom).font(.caption.weight(.semibold)).foregroundStyle(Color(.glace))
+                Button(action: retirer) {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color(.texteSecondaire))
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Retirer l’étiquette \(nom)")
+            }
+            .padding(.leading, 10)
+            .background(Console.bouton, in: .capsule)
+            .overlay(Capsule().strokeBorder(Color(.acier), lineWidth: 1))
+        }
+    }
+}
+
+/// 23.10 : un fichier refusé par l'appareil ou au dépôt (trop lourd, type) : son nom, « Refusé : … », « Retirer ».
+private struct CarteRefusLocal: View {
+    @Environment(Alfred.self) private var alfred
+    let refus: RefusLocal
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(refus.nom)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color(.glace))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(refus.texte)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CarteDocument.roseRefus)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                alfred.annexes?.retirer(refus)
+            } label: {
+                CarteDocument.etiquette("Retirer")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retirer \(refus.nom)")
+        }
+        .padding(.leading, 12)
+        .padding([.vertical, .trailing], 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 12 / 255, green: 27 / 255, blue: 40 / 255), in: .rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(CarteDocument.rouge, lineWidth: 1.5))
+        .accessibilityElement(children: .contain)
     }
 }
 

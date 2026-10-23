@@ -4,7 +4,8 @@ import Observation
 
 /// Les annexes de la console, autour de la conversation : documents, notifications, liens vers les autres systèmes
 /// et état des services. Mêmes routes et mêmes rythmes que la console :
-/// - documents : toutes les 60 s, toutes les 2,5 s tant qu'un document est en lecture, 30 s après un échec ;
+/// - documents : toutes les 60 s, toutes les 2,5 s tant qu'un document est en lecture ou en rangement, 10 s si un
+///   résumé est en file (23.10), 30 s après un échec ;
 /// - notifications : toutes les 15 s (la personne connectée seulement) ; toutes les 3 s pendant l'attente d'une réponse
 ///   d'Hermes posée ici (22.10), réclamée puis passée à la conversation pour être lue ;
 /// - liens : une fois (redemandés toutes les 15 s si la maison ne répond pas) ;
@@ -20,6 +21,16 @@ final class Annexes {
     }
 
     private(set) var documents: [DocumentMaison] = []
+    /// 23.10 : les fichiers refusés par l'appareil ou au dépôt (trop lourd, type) : une carte locale, jusqu'à « Retirer ».
+    private(set) var refusLocaux: [RefusLocal] = []
+    /// 23.10 : la pastille de l'en-tête : ce qui demande une action (en cours, refusés), refus locaux compris.
+    private(set) var pastilleDocuments = 0
+    /// 23.10 : le bouton armé (« Retirer », « Supprimer ») d'une carte, gardé ici et non dans la carte : une relecture de
+    /// la liste ne le remet pas à zéro.
+    private(set) var deuxTemps = DeuxTemps()
+    /// 23.10 : les étiquettes proposées au dépôt (`GET /docs/etiquettes`) ; nil : le relais ne les connaît pas (plus
+    /// ancien) ou ne les a pas encore données — le champ « Étiquettes » est alors caché.
+    private(set) var etiquettes: ListeEtiquettes?
     private(set) var accesDocuments = AccesDocuments.ouvert
     /// « Envoi de devis.pdf… », « Reçu. Alfred le lit… » (la ligne d'état de la console, sous le dépôt).
     private(set) var etatDepot: String?
@@ -44,6 +55,8 @@ final class Annexes {
     @ObservationIgnored private let aviser: @MainActor (String, Conversation.Avis.Genre) -> Void
     @ObservationIgnored private var taches: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var connecte = false
+    /// La dernière liste du relais (pour la pastille : son compte `a_traiter`).
+    @ObservationIgnored private var listeDocuments: ListeDocuments?
     /// Les relectures tournent.
     @ObservationIgnored private var actif = false
     /// L'app est cachée : rien ne repart avant `reprendre()`, même une reconnexion.
@@ -112,6 +125,29 @@ final class Annexes {
         boucle("documents") { [weak self] in await self?.chargerDocuments() ?? .seconds(60) }
     }
 
+    /// 23.10 : relire les étiquettes proposées (à l'ouverture de la fenêtre Documents). 404 : un relais plus ancien
+    /// (champ caché) ; la maison muette : liste vide, « indisponible » (un nom nouveau reste possible).
+    func relireEtiquettes() {
+        guard actif else { return }
+        Task { [weak self] in await self?.chargerEtiquettes() }
+    }
+
+    private func chargerEtiquettes() async {
+        guard let (statut, corps) = try? await acces.lire("/docs/etiquettes") else {
+            if etiquettes != nil { etiquettes = ListeEtiquettes(etiquettes: [], disponible: false) }
+            return
+        }
+        let l: ListeEtiquettes? =
+            switch statut {
+            case 200:
+                (try? JSONDecoder().decode(ListeEtiquettes.self, from: corps))
+                    ?? ListeEtiquettes(etiquettes: [], disponible: false)
+            case 500...: ListeEtiquettes(etiquettes: [], disponible: false)
+            default: nil
+            }
+        if l != etiquettes { etiquettes = l }
+    }
+
     func relireNotifications() {
         guard actif, connecte else { return }
         boucle("notifications") { [weak self] in await self?.chargerNotifications() ?? .seconds(15) }
@@ -133,16 +169,22 @@ final class Annexes {
             let (statut, corps) = try await acces.lire("/docs")
             switch statut {
             case 200:
-                let l = try JSONDecoder().decode(ListeDocuments.self, from: corps).documents
+                let liste = try JSONDecoder().decode(ListeDocuments.self, from: corps)
                 if accesDocuments != .ouvert { accesDocuments = .ouvert }
-                if l != documents { documents = l }
-                return l.contains { $0.etat == .enCours } ? .milliseconds(2500) : .seconds(60)
+                if liste.documents != documents { documents = liste.documents }
+                listeDocuments = liste
+                compterDocuments()
+                return liste.delaiRelecture
             case 401:
                 documents = []
+                listeDocuments = nil
+                compterDocuments()
                 accesDocuments = .reserve("Les documents sont réservés aux personnes connectées.")
                 return .seconds(60)
             case 403:
                 documents = []
+                listeDocuments = nil
+                compterDocuments()
                 accesDocuments = .reserve(
                     String(decoding: corps.prefix(200), as: UTF8.self).nonVide ?? "Les documents vous sont fermés.")
                 return .seconds(60)
@@ -214,31 +256,80 @@ final class Annexes {
 
     /// Dépose un document (20 Mo au plus) ; la liste se relit ensuite.
     func deposer(_ depot: DepotDocument) async {
-        guard !envoiEnCours else { return }
-        guard depot.fichier.count <= DepotDocument.tailleMax else {
-            signaler("Document trop lourd : 20 Mo au plus.")
-            return
-        }
+        await deposer(lot: LotDepot(pourLe: depot.pourLe, total: 1)) { _ in depot }
+    }
+
+    /// 23.10 : dépose un LOT (plusieurs fichiers choisis d'un coup), un fichier à la fois, comme la console : chacun est
+    /// préparé (lu, converti) juste avant son envoi — un seul en mémoire —, puis envoyé ; `preparer` rend nil pour un
+    /// fichier illisible ou déjà refusé (il l'a signalé). Un fichier trop lourd, ou refusé par le relais (413, 415),
+    /// devient une carte « Refusé » de l'app ; un échec d'envoi est signalé, et le lot continue. La liste se relit
+    /// ensuite.
+    func deposer(lot: LotDepot, preparer: @MainActor (Int) async -> DepotDocument?) async {
+        guard !envoiEnCours, lot.total > 0 else { return }
         envoiEnCours = true
         erreurDepot = nil
-        etatDepot = "Envoi de \(depot.nomFichier)…"
         defer { envoiEnCours = false }
-        do {
-            let (statut, _) = try await acces.envoyer(depot.requete())
-            guard (200..<300).contains(statut) else {
-                throw ErreurRelais(statut == 415 ? "type non pris en charge (PDF, image, texte)" : "HTTP \(statut)")
+        var recus = 0
+        for rang in 0..<lot.total {
+            guard let depot = await preparer(rang) else { continue }
+            guard depot.fichier.count <= DepotDocument.tailleMax else {
+                refuserLocalement(RefusLocal(nom: depot.nomFichier, motif: .taille))
+                continue
             }
-            etatDepot = "Reçu. Alfred le lit…"
-            aviser("Document reçu.", .info)
+            etatDepot = lot.etatEnvoi(depot.nomFichier, rang: rang + 1)
+            do {
+                let (statut, corps) = try await acces.envoyer(depot.requete())
+                // 413, 415, et 400 avec le texte du relais (23.10 : une étiquette refusée) : une carte « Refusé »
+                if let refus = RefusLocal(nom: depot.nomFichier, statut: statut, corps: corps) {
+                    refuserLocalement(refus)
+                    continue
+                }
+                guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }
+                recus += 1
+            } catch {
+                signaler("Envoi impossible : " + Self.motif(error))
+            }
+            relireDocuments()
+        }
+        etatDepot = LotDepot.recus(recus)
+        if recus > 0 {
+            aviser(recus > 1 ? "\(recus) documents reçus." : "Document reçu.", .info)
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(6))
-                if self?.etatDepot?.hasPrefix("Reçu") == true { self?.etatDepot = nil }
+                if self?.etatDepot == LotDepot.recus(recus) { self?.etatDepot = nil }
             }
-        } catch {
-            etatDepot = nil
-            signaler("Envoi impossible : " + Self.motif(error))
         }
         relireDocuments()
+    }
+
+    /// 23.10 : un fichier refusé par l'appareil (trop lourd) ou au dépôt (413, 415) : une carte « Refusé » de l'app, et un
+    /// avis.
+    func refuserLocalement(_ refus: RefusLocal) {
+        refusLocaux.insert(refus, at: 0)
+        compterDocuments()
+        aviser(refus.texte, .attention)
+    }
+
+    /// 23.10 : un toucher sur un bouton en deux temps : true s'il confirme l'action armée pour ce document ; sinon il
+    /// l'arme (3,5 s, puis la carte redevient d'elle-même « Retirer » ou « Supprimer ») et rend false.
+    func toucherEnDeuxTemps(_ action: String, _ document: DocumentMaison) -> Bool {
+        if deuxTemps.toucher(action, id: document.id) { return true }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(DeuxTemps.delai + 0.05))
+            self?.deuxTemps.expirer()
+        }
+        return false
+    }
+
+    /// « Retirer » sur un refus de l'appareil : la carte disparaît (rien n'a été gardé à la maison).
+    func retirer(_ refus: RefusLocal) {
+        refusLocaux.removeAll { $0.id == refus.id }
+        compterDocuments()
+    }
+
+    private func compterDocuments() {
+        let n = (listeDocuments ?? ListeDocuments(documents: [])).pastille(refusLocaux: refusLocaux.count)
+        if n != pastilleDocuments { pastilleDocuments = n }
     }
 
     /// Un échec de dépôt (fichier illisible, trop lourd, envoi refusé) : dans la fenêtre Documents, et en avis.
@@ -254,21 +345,43 @@ final class Annexes {
     }
 
     /// L'identifiant d'un document dans un chemin : « / » échappé aussi (il ne doit jamais viser une autre route).
-    static func segment(_ id: String) -> String {
-        var permis = CharacterSet.urlPathAllowed
-        permis.remove("/")
-        return id.addingPercentEncoding(withAllowedCharacters: permis) ?? id
+    static func segment(_ id: String) -> String { DocumentMaison.segment(id) }
+
+    /// « Supprimer » (un document de banc, ou lu par un relais plus ancien) : la fiche quitte la maison.
+    func supprimer(_ document: DocumentMaison) async {
+        await effacer(document, fait: "Document supprimé.", echec: "Suppression impossible : ")
     }
 
-    func supprimer(_ document: DocumentMaison) async {
-        let chemin = "/docs/" + Self.segment(document.id)
+    /// 23.10 : « Retirer » un document refusé : il quitte la maison (il n'est pas dans Paperless ; un doublon y est
+    /// déjà).
+    func retirer(_ document: DocumentMaison) async {
+        await effacer(document, fait: "Document retiré.", echec: "Retrait impossible : ")
+    }
+
+    private func effacer(_ document: DocumentMaison, fait: String, echec: String) async {
         do {
-            let (statut, _) = try await acces.envoyer(RequeteRelais(.delete, chemin))
+            let (statut, _) = try await acces.envoyer(document.requeteRetirer)
             guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }
             erreurDepot = nil
-            aviser("Document supprimé.", .info)
+            aviser(fait, .info)
         } catch {
-            signaler("Suppression impossible : " + Self.motif(error))
+            signaler(echec + Self.motif(error))
+        }
+        relireDocuments()
+    }
+
+    /// 23.10 : « Réessayer » un document refusé (lecture, Paperless) : le relais reprend l'étape qui a échoué.
+    func reessayer(_ document: DocumentMaison) async {
+        do {
+            let (statut, corps) = try await acces.envoyer(document.requeteReessayer)
+            // 409 : le texte du relais (« rien à réessayer », « ce document n'est pas refusé »), comme la console
+            if statut == 409 {
+                throw ErreurRelais(String(decoding: corps.prefix(200), as: UTF8.self).nonVide ?? "rien à réessayer")
+            }
+            guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }
+            erreurDepot = nil
+        } catch {
+            signaler("Nouvel essai impossible : " + Self.motif(error))
         }
         relireDocuments()
     }

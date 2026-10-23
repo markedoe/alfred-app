@@ -35,8 +35,11 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
 - **L’environnement** : l’extérieur (météo), les pièces mesurées, l’énergie ; les jauges en bas de la console ;
   l’état des services de la maison (pastilles).
 - **Les fenêtres de l’en-tête, comme la console connectée**
-  - *Documents* : déposer un document à la maison (photothèque, scanner de documents d’iOS, fichiers), le jour
-    qu’il concerne ; la liste et le résumé de chacun ; supprimer en deux temps.
+  - *Documents* : déposer un ou plusieurs documents à la maison (photothèque et fichiers en sélection multiple,
+    scanner de documents d’iOS), le jour qu’ils concernent et leurs étiquettes (choisies dans la liste de la maison,
+    ou nouvelles) ; une carte par fichier, comme la boîte d’arrivée de la console : en lecture, rangé dans Paperless
+    (lien vers sa fiche ; la carte part après 24 h), ou refusé avec son motif (« Réessayer », « Retirer ») ; le
+    résumé arrive quand il est prêt.
   - *Notifications* : la copie de celles des téléphones de la personne connectée, marquées lues à l’ouverture.
   - *Autres systèmes* : les liens que la maison donne selon le compte, ouverts dans Safari.
   - *Réglages & état* : le modèle, les entités, la dernière réponse, le choix et l’essai du micro ; puis le compte,

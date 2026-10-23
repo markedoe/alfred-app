@@ -379,11 +379,12 @@ private struct BoutonDocuments: View {
     let action: () -> Void
 
     var body: some View {
-        let n = alfred.annexes?.documents.count ?? 0
+        // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (en cours, refusés)
+        let n = alfred.annexes?.pastilleDocuments ?? 0
         BoutonFenetre(
             titre: "Documents", icone: "doc", texte: texte, nombre: n, fondCompteur: Color(.faisceauSombre),
             texteCompteur: Color(.glace),
-            libelle: n > 0 ? "Documents, \(n) déposé\(n > 1 ? "s" : "")" : "Documents", action: action
+            libelle: n > 0 ? "Documents, \(n) à traiter" : "Documents", action: action
         )
         .accessibilityIdentifier("documents")
     }

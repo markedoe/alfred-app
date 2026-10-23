@@ -177,15 +177,21 @@ final class ParcoursUITests: XCTestCase {
 
         let documents = bouton(app, "documents")
         XCTAssertTrue(documents.waitForExistence(timeout: 10))
-        XCTAssertTrue(documents.label.contains("1 déposé"), documents.label)
+        // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (le refus de la démo)
+        XCTAssertTrue(documents.label.contains("1 à traiter"), documents.label)
         documents.tap()
         XCTAssertTrue(element(app, contenant: "Facture d’exemple").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, contenant: "Rangé dans Paperless").exists)
+        XCTAssertTrue(element(app, contenant: "Refusé : aucun texte lisible").exists)
         XCTAssertTrue(element(app, contenant: "Déposer un document").exists)
-        // « Supprimer » se touche sur 44 pt au moins, pas seulement sur son texte (revue du 18.10, point 15)
-        let supprimer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Supprimer ")).firstMatch
-        XCTAssertTrue(supprimer.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(supprimer.frame.height, 44, "cible de « Supprimer »")
-        XCTAssertGreaterThanOrEqual(supprimer.frame.width, 44, "cible de « Supprimer »")
+        // plus de « Supprimer » sur un document rangé
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Supprimer ")).firstMatch.exists)
+        // « Retirer » se touche sur 44 pt au moins, pas seulement sur son texte (revue du 18.10, point 15)
+        let retirer = app.buttons["Retirer Photo floue d’exemple"]
+        XCTAssertTrue(retirer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(retirer.frame.height, 44, "cible de « Retirer »")
+        XCTAssertGreaterThanOrEqual(retirer.frame.width, 44, "cible de « Retirer »")
+        XCTAssertTrue(app.buttons["Réessayer Photo floue d’exemple"].exists)
         capturer(app, "6-documents")
         fermer.tap()
 

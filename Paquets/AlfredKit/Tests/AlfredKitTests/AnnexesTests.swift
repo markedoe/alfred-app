@@ -39,6 +39,262 @@ struct AnnexesTests {
         #expect(DocumentMaison.vrai(.objet([:])) && DocumentMaison.vrai(.booleen(true)))
     }
 
+    @Test("Documents d'un relais plus ancien (23.10) : statut déduit comme l'ancienne console, pastille, boutons")
+    func documentsAncienRelais() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"documents":[{"id":"a","nom":"devis","etat":"pret","resume":"Un devis.","paperless":{"tache":"x"}},{"id":"b","nom":"note","etat":"pret","resume":"Une note."},{"id":"c","nom":"photo","etat":"erreur","erreur":"illisible"},{"id":"d","nom":"lettre","etat":"en cours"}]}"#
+            ))
+        let d = l.documents
+        #expect(d.map(\.statut) == [.range, .lu, .refuse, .lecture])
+        #expect(l.aTraiter == nil && l.horsPanneau == nil)
+        #expect(l.pastille() == 2, "en lecture ou en erreur")
+        #expect(l.pastille(refusLocaux: 1) == 3)
+        #expect(d[0].texteEtat == "Rangé dans Paperless" && d[1].texteEtat == nil)
+        #expect(d[2].texteEtat == "Refusé : lecture impossible (illisible)")
+        #expect(d[3].texteEtat == "Lecture en cours…" && d[3].resumeAffiche == nil)
+        #expect(d[1].resumeAffiche == "Une note.")
+        // plus de « Supprimer » sur un document rangé ; un document que Paperless n'a pas peut encore être supprimé
+        #expect(!d[0].peutSupprimer && d[1].peutSupprimer && !d[0].peutRetirer)
+        #expect(d[2].peutRetirer && !d[2].peutReessayer, "l'ancien relais ne sait pas réessayer")
+        #expect(l.delaiRelecture == .milliseconds(2500))
+    }
+
+    @Test("Documents de la boîte d'arrivée (23.10) : verdicts, motifs, lien, attente du résumé, pastille du relais")
+    func documentsBoiteArrivee() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"a_traiter":3,"hors_panneau":7,"documents":[{"id":"r","nom":"facture","etat":"pret","statut":"range","lien":"https://paperless.exemple.invalid/documents/12/details","paperless":{"etat":"range","document":12},"resume":null,"resume_attente":"pc","quitte_le":"2026-10-24T09:00:00+02:00","reessayer":false},{"id":"e","nom":"offre","etat":"pret","statut":"envoye","paperless":{"etat":"envoye","document":null},"resume":"Une offre.","resume_attente":"file"},{"id":"i","nom":"photo floue","etat":"erreur","statut":"refuse","refus":"illisible","motif":"aucun texte lisible","reessayer":true,"erreur":"aucun texte lisible"},{"id":"dv","nom":"facture bis","etat":"pret","statut":"refuse","refus":"doublon","motif":"déjà dans Paperless","lien":"https://paperless.exemple.invalid/documents/12/details","reessayer":false},{"id":"dc","nom":"pièce","etat":"pret","statut":"refuse","refus":"doublon","deja_archive":true,"lien":"javascript:alert(1)"},{"id":"g","nom":"rangement","etat":"pret","statut":"rangement"},{"id":"b","nom":"banc","etat":"pret","statut":"banc","resume":"Banc."},{"id":"x","nom":"futur","etat":"pret","statut":"inconnu","paperless":{"etat":"range"}}]}"#
+            ))
+        let d = l.documents
+        #expect(d.map(\.statut) == [.range, .envoye, .refuse, .refuse, .refuse, .rangement, .banc, .range])
+        #expect(l.aTraiter == 3 && l.horsPanneau == 7)
+        #expect(l.pastille() == 3, "le compte du relais d'abord")
+        #expect(l.pastille(refusLocaux: 2) == 5)
+        #expect(d[0].texteEtat == "Rangé dans Paperless — résumé quand le PC d’Alfred sera allumé")
+        #expect(d[0].lien?.host == "paperless.exemple.invalid" && d[0].paperless && d[0].quitteLe != nil)
+        #expect(d[1].texteEtat == "Envoyé à Paperless — résumé en cours…" && d[1].resumeAffiche == "Une offre.")
+        #expect(d[2].texteEtat == "Refusé : aucun texte lisible" && d[2].peutReessayer && d[2].peutRetirer)
+        #expect(d[3].texteEtat == "Refusé : déjà dans Paperless" && !d[3].peutReessayer && d[3].lien != nil)
+        #expect(d[4].dejaArchive && d[4].lien == nil, "jamais un lien autre que http(s)")
+        #expect(d[4].texteEtat == "Refusé : déjà dans Paperless", "doublon sans motif écrit")
+        #expect(d[5].texteEtat == "Rangement dans Paperless…" && d[5].aTraiter)
+        #expect(d[6].texteEtat == "Lu (banc : pas rangé dans Paperless)" && d[6].peutSupprimer)
+        #expect(!d[0].peutSupprimer && !d[0].peutRetirer && !d[1].peutSupprimer, "rangé : ni Supprimer ni Retirer")
+        #expect(d[7].statut == .range, "un statut inconnu : déduit comme l'ancienne console")
+        #expect(l.delaiRelecture == .milliseconds(2500), "une carte en rangement")
+        let file = ListeDocuments(documents: [d[1]])
+        #expect(file.delaiRelecture == .seconds(10), "un résumé en file")
+        #expect(ListeDocuments(documents: [d[0], d[2]]).delaiRelecture == .seconds(30), "un résumé attend le PC")
+        #expect(ListeDocuments(documents: [d[2], d[3]]).delaiRelecture == .seconds(60))
+        // une valeur d'un autre type pour un champ nouveau ne perd jamais la liste
+        let tolerant = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(#"{"a_traiter":"x","documents":[{"id":"t","etat":"pret","statut":5,"reessayer":"oui"}]}"#))
+        #expect(tolerant.aTraiter == nil && tolerant.documents[0].statut == .lu && tolerant.documents[0].reessayer)
+    }
+
+    @Test("Relecture (23.10) : 2,5 s en lecture ou rangement, 10 s résumé en file, 30 s résumé qui attend le PC, 60 s")
+    func relecture() {
+        func d(_ statut: String, _ attente: String? = nil) -> DocumentMaison {
+            DocumentMaison(id: statut, nom: statut, etat: "pret", statut: statut, resumeAttente: attente)
+        }
+        #expect(ListeDocuments(documents: [d("range", "pc"), d("lecture")]).delaiRelecture == .milliseconds(2500))
+        #expect(ListeDocuments(documents: [d("range", "pc"), d("envoye", "file")]).delaiRelecture == .seconds(10))
+        #expect(ListeDocuments(documents: [d("range", "pc"), d("refuse")]).delaiRelecture == .seconds(30))
+        #expect(ListeDocuments(documents: [d("range"), d("refuse")]).delaiRelecture == .seconds(60))
+        #expect(ListeDocuments(documents: []).delaiRelecture == .seconds(60))
+    }
+
+    @Test(
+        "Deux temps (23.10) : armer, confirmer dans les 3,5 s ; autre document ou autre action : réarme ; délai passé")
+    func deuxTemps() {
+        let t0 = Date(timeIntervalSince1970: 1_792_300_000)
+        var b = DeuxTemps()
+        // un toucher modifie l'état : son résultat est lu avant le #expect (la macro n'accepte pas un appel « mutating »)
+        var confirme = b.toucher("retirer", id: "a", maintenant: t0)
+        #expect(!confirme, "le premier toucher arme")
+        #expect(b.estArme("retirer", id: "a", maintenant: t0 + 3) && !b.estArme("retirer", id: "b", maintenant: t0))
+        confirme = b.toucher("retirer", id: "a", maintenant: t0 + 3)
+        #expect(confirme, "le second, dans le délai, confirme")
+        #expect(!b.estArme("retirer", id: "a", maintenant: t0 + 3), "puis plus rien d'armé")
+        confirme = b.toucher("retirer", id: "a", maintenant: t0 + 10)
+        #expect(!confirme)
+        confirme = b.toucher("supprimer", id: "a", maintenant: t0 + 11)
+        #expect(!confirme, "une autre action réarme")
+        confirme = b.toucher("supprimer", id: "b", maintenant: t0 + 12)
+        #expect(!confirme, "un autre document réarme")
+        #expect(!b.estArme("supprimer", id: "a", maintenant: t0 + 12), "une seule action armée à la fois")
+        confirme = b.toucher("supprimer", id: "b", maintenant: t0 + 15.6)
+        #expect(!confirme, "délai passé : réarme au lieu de confirmer")
+        b.expirer(maintenant: t0 + 16)
+        #expect(b.estArme("supprimer", id: "b", maintenant: t0 + 16), "pas encore expiré")
+        b.expirer(maintenant: t0 + 19.1)
+        #expect(!b.estArme("supprimer", id: "b", maintenant: t0 + 15.7), "expiré : plus rien d'armé")
+    }
+
+    @Test(
+        "Refus de Paperless (23.10) : « paperless_refus », motif tel quel, Réessayer ; un code inconnu reste un refus")
+    func refusPaperless() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"a_traiter":3,"documents":[{"id":"p","nom":"devis","etat":"pret","statut":"refuse","refus":"paperless_refus","motif":"Paperless n'a pas pu ranger ce fichier","reessayer":true,"resume":"Un devis."},{"id":"a","nom":"lettre","etat":"pret","statut":"refuse","refus":"paperless_absent","motif":"pas encore rangé dans Paperless","reessayer":true},{"id":"x","nom":"note","etat":"pret","statut":"refuse","refus":"code_futur","motif":"un motif nouveau","reessayer":true}]}"#
+            ))
+        let d = l.documents
+        #expect(d.map(\.statut) == [.refuse, .refuse, .refuse])
+        #expect(d[0].refus == "paperless_refus" && d[0].texteEtat == "Refusé : Paperless n'a pas pu ranger ce fichier")
+        #expect(d[0].peutReessayer && d[0].peutRetirer && !d[0].peutSupprimer && d[0].resumeAffiche == "Un devis.")
+        #expect(d[1].texteEtat == "Refusé : pas encore rangé dans Paperless" && d[1].peutReessayer)
+        #expect(d[2].texteEtat == "Refusé : un motif nouveau" && d[2].peutReessayer, "code inconnu : un simple refus")
+        #expect(l.pastille() == 3)
+    }
+
+    @Test("Étiquettes (23.10) : liste du relais, tolérante ; nettoyage d'un nom tapé ; clé sans casse ni accents")
+    func etiquettesListeEtNettoyage() throws {
+        let l = try JSONDecoder().decode(
+            ListeEtiquettes.self,
+            from: Self.json(
+                #"{"etiquettes":[{"id":3,"nom":"Assurance"},{"id":"x","nom":"Faux"},{"id":7,"nom":""},{"id":9,"nom":"Électricité"}],"disponible":true}"#
+            ))
+        #expect(
+            l.etiquettes == [EtiquetteDocument(id: 3, nom: "Assurance"), EtiquetteDocument(id: 9, nom: "Électricité")])
+        #expect(l.disponible)
+        let muette = try JSONDecoder().decode(
+            ListeEtiquettes.self, from: Self.json(#"{"etiquettes":[],"disponible":false}"#))
+        #expect(muette.etiquettes.isEmpty && !muette.disponible)
+        #expect(try JSONDecoder().decode(ListeEtiquettes.self, from: Self.json("{}")).disponible == false)
+        // contrôle, format (invisible), séparateurs → espace ; espaces réduits ; bords retirés ; 40 au plus ; NFC
+        #expect(Etiquettes.nettoyer("  Impôts\t2026\n ") == "Impôts 2026")
+        #expect(Etiquettes.nettoyer("Mai\u{200B}son\u{00A0}\u{00A0}neuve\u{2028}") == "Mai son neuve")
+        #expect(
+            Etiquettes.nettoyer("Cafe\u{0301}") == "Café"
+                && Etiquettes.nettoyer("Cafe\u{0301}")?.unicodeScalars.count == 4)
+        #expect(Etiquettes.nettoyer(String(repeating: "a", count: 50))?.count == 40)
+        #expect(Etiquettes.nettoyer(String(repeating: "a", count: 39) + " b") == String(repeating: "a", count: 39))
+        #expect(Etiquettes.nettoyer(" \u{200B}\n\t ") == nil && Etiquettes.nettoyer("") == nil)
+        #expect(Etiquettes.cle("Électricité") == Etiquettes.cle("electricite"))
+        #expect(Etiquettes.cle("ÉCOLE") == "ecole")
+    }
+
+    @Test("Étiquettes (23.10) : propositions par les premières lettres (nom ou mot), 8 au plus, nouvelle en dernier")
+    func etiquettesPropositions() {
+        let liste = [
+            "Assurance", "Assurance maladie", "Banque", "Électricité", "Facture électricité", "Impôts", "Maison",
+            "Voiture", "Assignation", "Astuce", "Asile", "Asperge", "Aster", "Asphalte", "Assiette",
+        ].enumerated().map { EtiquetteDocument(id: $0.offset + 1, nom: $0.element) }
+        let elec = Etiquettes.propositions("elec", liste: liste, choisies: [])
+        #expect(elec.map(\.texte) == ["Électricité", "Facture électricité", "Nouvelle étiquette : elec"])
+        // la saisie nettoyée correspond à une étiquette (sans casse ni accents) : pas de « nouvelle »
+        let exacte = Etiquettes.propositions("ELECTRICITE ", liste: liste, choisies: [])
+        #expect(exacte.map(\.texte) == ["Électricité", "Facture électricité"])
+        // celles déjà choisies sont exclues, et une nouvelle déjà choisie n'est pas reproposée
+        let choisies: [ChoixEtiquette] = [.existante(liste[3]), .nouvelle("Électroménager")]
+        #expect(
+            Etiquettes.propositions("élec", liste: liste, choisies: choisies).map(\.texte) == [
+                "Facture électricité", "Nouvelle étiquette : élec",
+            ])
+        #expect(Etiquettes.propositions("electromenager", liste: liste, choisies: choisies).isEmpty)
+        // 8 au plus, puis la nouvelle
+        let parAs = Etiquettes.propositions("as", liste: liste, choisies: [])
+        #expect(
+            parAs.count == 9 && parAs.last == .nouvelle("as")
+                && parAs.dropLast().allSatisfy { $0.texte.lowercased().contains("as") })
+        // saisie vide (champ touché) : les 8 premières dans l'ordre du relais, choisies exclues, sans « nouvelle »
+        #expect(
+            Etiquettes.propositions("  ", liste: liste, choisies: []).map(\.texte) == Array(liste.prefix(8).map(\.nom)))
+        #expect(
+            Etiquettes.propositions("", liste: liste, choisies: [.existante(liste[0])]).map(\.texte)
+                == Array(liste.dropFirst().prefix(8).map(\.nom)))
+        #expect(Etiquettes.propositions("", liste: [], choisies: []).isEmpty)
+        #expect(
+            Etiquettes.propositions("mal", liste: liste, choisies: []).first?.texte == "Assurance maladie",
+            "un mot du nom")
+        #expect(Etiquettes.choixDirect("maison", liste: liste, choisies: []) == .existante(liste[6]))
+        #expect(Etiquettes.choixDirect(" Jardin\u{200B} ", liste: liste, choisies: []) == .nouvelle("Jardin"))
+        #expect(Etiquettes.choixDirect("électroménager", liste: liste, choisies: choisies) == nil, "déjà choisie")
+        #expect(
+            ChoixEtiquette.existante(liste[0]).valeur == "1" && ChoixEtiquette.nouvelle("Jardin").valeur == "Jardin")
+    }
+
+    @Test("Étiquettes (23.10) : un champ « etiquette » par étiquette, les mêmes pour tout le lot ; 10 au plus")
+    func etiquettesMultipart() throws {
+        let lot = LotDepot(pourLe: nil, total: 2, etiquettes: ["3", "Jardin"])
+        // un fichier sans « F » majuscule : la frontière « F » reste telle quelle
+        for nom in ["a.pdf", "b.pdf"] {
+            let r = lot.depot(fichier: Data("%pdf".utf8), nomFichier: nom, type: "application/pdf").requete(
+                frontiere: "F")
+            let texte = String(decoding: try #require(r.corps), as: UTF8.self)
+            #expect(texte.contains("--F\r\nContent-Disposition: form-data; name=\"etiquette\"\r\n\r\n3\r\n"))
+            #expect(texte.contains("name=\"etiquette\"\r\n\r\nJardin\r\n--F--\r\n"))
+            #expect(texte.components(separatedBy: "name=\"etiquette\"").count == 3)
+        }
+        let trop = DepotDocument(
+            fichier: Data(), nomFichier: "c.pdf", type: "application/pdf", etiquettes: (1...12).map(String.init))
+        #expect(trop.etiquettes.count == 10)
+        let sans = DepotDocument(fichier: Data(), nomFichier: "d.pdf", type: "application/pdf")
+        #expect(!String(decoding: sans.requete(frontiere: "F").corps!, as: UTF8.self).contains("etiquette"))
+        // la frontière n'apparaît jamais dans une étiquette
+        let piege = DepotDocument(fichier: Data(), nomFichier: "e.pdf", type: "application/pdf", etiquettes: ["xFy"])
+        #expect(piege.requete(frontiere: "F").type != "multipart/form-data; boundary=F")
+    }
+
+    @Test(
+        "Étiquettes d'une carte (23.10) : posées et non posées après la date ; ancien relais : rien ; refus 400 lisible"
+    )
+    func etiquettesCarte() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"documents":[{"id":"a","etat":"pret","statut":"range","etiquettes":["Maison","Jardin"],"etiquettes_non_posees":["Jardin"]},{"id":"b","etat":"pret","statut":"range","etiquettes":["Impôts"],"etiquettes_non_posees":["A","B"]},{"id":"c","etat":"pret"},{"id":"d","etat":"pret","etiquettes":"x","etiquettes_non_posees":[1,""]}]}"#
+            ))
+        let d = l.documents
+        #expect(d[0].etiquettes == ["Maison", "Jardin"] && d[0].etiquettesNonPosees == ["Jardin"])
+        #expect(d[0].texteEtiquettes == " · étiquettes : Maison, Jardin · non posée : Jardin")
+        #expect(d[1].texteEtiquettes == " · étiquettes : Impôts · non posées : A, B")
+        #expect(d[2].etiquettes.isEmpty && d[2].texteEtiquettes.isEmpty, "ancien relais")
+        #expect(d[3].etiquettes.isEmpty && d[3].etiquettesNonPosees.isEmpty, "valeurs d'un autre type : sautées")
+        let refus = RefusLocal(
+            nom: "devis.pdf", statut: 400,
+            corps: Data("étiquette inconnue (n° 12) : rechoisissez-la dans la liste".utf8))
+        #expect(refus?.texte == "Refusé : étiquette inconnue (n° 12) : rechoisissez-la dans la liste")
+        #expect(RefusLocal(nom: "x", statut: 400) == nil, "400 sans texte : un échec ordinaire")
+    }
+
+    @Test("Réessayer et retirer (23.10) : les requêtes du relais, l'identifiant échappé")
+    func reessayer() {
+        let d = DocumentMaison(id: "20261023-101500-devis-ab12", nom: "devis", etat: "erreur", statut: "refuse")
+        #expect(d.requeteReessayer == RequeteRelais(.post, "/docs/20261023-101500-devis-ab12/reessayer"))
+        #expect(d.requeteReessayer.corps == nil && d.requeteReessayer.type == nil)
+        #expect(d.requeteRetirer == RequeteRelais(.delete, "/docs/20261023-101500-devis-ab12"))
+        let piege = DocumentMaison(id: "../notifications/effacer", nom: "x", etat: "erreur")
+        #expect(piege.requeteReessayer.chemin == "/docs/..%2Fnotifications%2Feffacer/reessayer")
+        #expect(DocumentMaison.segment("42") == "42")
+    }
+
+    @Test("Lot (23.10) : « Pour le » vaut pour tout le lot ; lignes d'état ; refus de l'appareil")
+    func lot() {
+        let lot = LotDepot(pourLe: "2026-10-24", total: 3)
+        let a = lot.depot(fichier: Data("%PDF".utf8), nomFichier: "a.pdf", type: "application/pdf")
+        let b = lot.depot(fichier: Data("x".utf8), nomFichier: "b.txt", type: "text/plain")
+        #expect(a.pourLe == "2026-10-24" && b.pourLe == "2026-10-24")
+        #expect(String(decoding: b.requete(frontiere: "F").corps!, as: UTF8.self).contains("2026-10-24"))
+        #expect(
+            LotDepot(pourLe: nil, total: 1).depot(fichier: Data(), nomFichier: "c.png", type: "image/png").pourLe == nil
+        )
+        #expect(lot.etatEnvoi("a.pdf", rang: 2) == "Envoi de a.pdf (2 sur 3)…")
+        #expect(LotDepot(pourLe: nil, total: 1).etatEnvoi("a.pdf", rang: 1) == "Envoi de a.pdf…")
+        #expect(LotDepot.recus(0) == nil && LotDepot.recus(1) == "Reçu. Alfred le lit…")
+        #expect(LotDepot.recus(3) == "3 reçus. Alfred les lit…")
+        #expect(RefusLocal(nom: "gros.pdf", statut: 413)?.texte == "Refusé : trop lourd (20 Mo au plus)")
+        #expect(
+            RefusLocal(nom: "x.docx", statut: 415)?.texte
+                == "Refusé : type non pris en charge (PDF, image, texte ou e-mail)")
+        #expect(RefusLocal(nom: "x", statut: 500) == nil && RefusLocal(nom: "x", statut: 202) == nil)
+    }
+
     @Test("Dépôt : le corps multipart de la console (fichier, nom, pour le)")
     func depot() throws {
         let fichier = Data([0x25, 0x50, 0x44, 0x46, 0x0D, 0x0A, 0x00, 0xFF])

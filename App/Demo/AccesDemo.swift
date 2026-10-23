@@ -22,6 +22,7 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
         case "/etat": corps = AnnexesDemo.etat
         case "/liens": corps = AnnexesDemo.liens
         case "/docs": corps = await annexes.documents()
+        case "/docs/etiquettes": corps = AnnexesDemo.etiquettes
         case "/notifications": corps = await annexes.notifications()
         default: return (404, Data())
         }
@@ -39,6 +40,9 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
         case (.post, "/notifications/effacer"):
             await annexes.toutEffacer()
             return (200, Data())
+        case (.post, let c) where c.hasPrefix("/docs/") && c.hasSuffix("/reessayer"):
+            let id = String(c.dropFirst("/docs/".count).dropLast("/reessayer".count))
+            return (await annexes.reessayer(id), Data())
         case (.delete, let c) where c.hasPrefix("/docs/"):
             return (await annexes.supprimer(String(c.dropFirst("/docs/".count))) ? 200 : 404, Data())
         default:
@@ -67,17 +71,35 @@ actor AnnexesDemo {
         "kuma": .nul,
     ]
 
+    /// 23.10 : des étiquettes inventées, triées par nom, comme le relais.
+    static let etiquettes: ValeurJSON = [
+        "etiquettes": [
+            ["id": 1, "nom": "Assurance"], ["id": 2, "nom": "Électricité"], ["id": 3, "nom": "Impôts"],
+            ["id": 4, "nom": "Maison"], ["id": 5, "nom": "Voiture"],
+        ],
+        "disponible": true,
+    ]
+
     static let liens: ValeurJSON = [
         ["nom": "Home Assistant", "url": "https://www.home-assistant.io", "note": "la maison"],
         ["nom": "Paperless", "url": "https://docs.paperless-ngx.com", "note": "les documents"],
     ]
 
+    /// 23.10 : la boîte d'arrivée, comme le relais : un document rangé dans Paperless (lien vers le site de Paperless,
+    /// public) et un refusé (aucun texte lisible), à réessayer ou retirer.
     private var docs: [ValeurJSON] = [
         [
-            "id": "demo-1", "nom": "Facture d’exemple", "etat": "pret",
+            "id": "demo-1", "nom": "Facture d’exemple", "etat": "pret", "statut": "range",
             "resume": "Une facture de démonstration : 120 francs, à payer d’ici la fin du mois.",
-            "depose_le": "2026-10-17T09:30:00+02:00", "pour_le": "2026-10-31", "paperless": ["tache": "demo"],
-        ]
+            "depose_le": "2026-10-17T09:30:00+02:00", "pour_le": "2026-10-31",
+            "paperless": ["etat": "range", "document": 1], "lien": "https://docs.paperless-ngx.com",
+            "etiquettes": ["Maison"],
+        ],
+        [
+            "id": "demo-2", "nom": "Photo floue d’exemple", "etat": "erreur", "statut": "refuse",
+            "refus": "illisible", "motif": "aucun texte lisible", "reessayer": true,
+            "depose_le": "2026-10-17T09:31:00+02:00",
+        ],
     ]
     private var notifs: [ValeurJSON] = [
         [
@@ -91,25 +113,56 @@ actor AnnexesDemo {
     ]
     private var depots = 0
 
-    func documents() -> ValeurJSON { ["documents": .liste(docs)] }
+    func documents() -> ValeurJSON {
+        let aTraiter = docs.filter { ["lecture", "rangement", "refuse"].contains($0["statut"]?.texte ?? "") }.count
+        return ["documents": .liste(docs), "a_traiter": .nombre(Double(aTraiter)), "hors_panneau": 0]
+    }
 
     func notifications() -> ValeurJSON {
         ["notifications": .liste(notifs), "non_lues": .nombre(Double(notifs.filter { $0["lu"] == false }.count))]
     }
 
-    /// Un dépôt de la démo : le nom du fichier est relu dans le corps ; la fiche est « prête » d'emblée.
+    /// Un dépôt de la démo : le nom du fichier est relu dans le corps ; la fiche est « rangée » d'emblée.
     func deposer(_ corps: Data) -> Bool {
         let texte = String(decoding: corps.prefix(4096), as: UTF8.self)
         guard let r = texte.range(of: #"filename="([^"]+)""#, options: .regularExpression) else { return false }
         let nom = texte[r].dropFirst("filename=\"".count).dropLast()
         depots += 1
+        // 23.10 : les étiquettes du dépôt (un n° de la liste, ou un nom nouveau), posées d'emblée dans la démo
+        let noms = Dictionary(
+            uniqueKeysWithValues: (Self.etiquettes["etiquettes"]?.liste ?? []).compactMap { e -> (String, String)? in
+                guard case .nombre(let n)? = e["id"], let nom = e["nom"]?.texte else { return nil }
+                return (String(Int(n)), nom)
+            })
+        let marque = "name=\"etiquette\"\r\n\r\n"
+        // les champs viennent après le fichier : lus dans la fin du corps
+        let fin = String(decoding: corps.suffix(4096), as: UTF8.self)
+        let etiquettes = fin.components(separatedBy: marque).dropFirst().compactMap { bout -> ValeurJSON? in
+            guard let valeur = bout.components(separatedBy: "\r\n").first, !valeur.isEmpty else { return nil }
+            return .texte(noms[valeur] ?? valeur)
+        }
         docs.insert(
             [
-                "id": .texte("demo-depot-\(depots)"), "nom": .texte(String(nom)), "etat": "pret",
+                "id": .texte("demo-depot-\(depots)"), "nom": .texte(String(nom)), "etat": "pret", "statut": "range",
                 "resume": "Document de démonstration : rien n’a quitté l’appareil.",
+                "paperless": ["etat": "range", "document": .nombre(Double(depots + 1))],
+                "etiquettes": .liste(etiquettes),
                 "depose_le": .texte(ISO8601DateFormatter().string(from: .now)),
             ], at: 0)
         return true
+    }
+
+    /// « Réessayer » : le refus de la démo devient un document rangé (202) ; 409 s'il n'y a rien à réessayer.
+    func reessayer(_ id: String) -> Int {
+        guard let i = docs.firstIndex(where: { $0["id"]?.texte == id }), docs[i]["statut"] == "refuse",
+            case .objet(var o) = docs[i]
+        else { return docs.contains { $0["id"]?.texte == id } ? 409 : 404 }
+        o["etat"] = "pret"
+        o["statut"] = "range"
+        o["resume"] = "Document de démonstration : lu au deuxième essai."
+        for cle in ["refus", "motif", "reessayer"] { o[cle] = nil }
+        docs[i] = .objet(o)
+        return 202
     }
 
     func supprimer(_ id: String) -> Bool {
