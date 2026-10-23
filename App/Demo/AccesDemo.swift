@@ -33,7 +33,9 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
     func envoyer(_ r: RequeteRelais) async throws -> (statut: Int, corps: Data) {
         switch (r.methode, r.chemin) {
         case (.post, "/docs"):
-            return (await annexes.deposer(r.corps ?? Data()) ? 202 : 400, Data())
+            // 23.10 (soir) : 202 et la fiche (son identifiant), comme le relais
+            guard let fiche = await annexes.deposer(r.corps ?? Data()) else { return (400, Data()) }
+            return (202, Data(fiche.enTexte().utf8))
         case (.post, "/notifications/lues"):
             await annexes.toutLire()
             return (200, Data())
@@ -85,15 +87,15 @@ actor AnnexesDemo {
         ["nom": "Paperless", "url": "https://docs.paperless-ngx.com", "note": "les documents"],
     ]
 
-    /// 23.10 : la boîte d'arrivée, comme le relais : un document rangé dans Paperless (lien vers le site de Paperless,
-    /// public) et un refusé (aucun texte lisible), à réessayer ou retirer.
+    /// 23.10 : la boîte d'arrivée, comme le relais : un document rangé dans Paperless il y a longtemps (hors du panneau ;
+    /// lien vers le site de Paperless, public) et un refusé (aucun texte lisible), à réessayer ou retirer.
     private var docs: [ValeurJSON] = [
         [
             "id": "demo-1", "nom": "Facture d’exemple", "etat": "pret", "statut": "range",
             "resume": "Une facture de démonstration : 120 francs, à payer d’ici la fin du mois.",
             "depose_le": "2026-10-17T09:30:00+02:00", "pour_le": "2026-10-31",
             "paperless": ["etat": "range", "document": 1], "lien": "https://docs.paperless-ngx.com",
-            "etiquettes": ["Maison"],
+            "etiquettes": ["Maison"], "range_le": "2026-10-17T09:31:00+02:00",
         ],
         [
             "id": "demo-2", "nom": "Photo floue d’exemple", "etat": "erreur", "statut": "refuse",
@@ -113,19 +115,32 @@ actor AnnexesDemo {
     ]
     private var depots = 0
 
+    /// 23.10 (soir) : comme le relais — le panneau (lecture, rangement, refusés, banc), les récents (rangés il y a
+    /// moins de 15 min), les refusés comptés, la liste de Paperless.
     func documents() -> ValeurJSON {
-        let aTraiter = docs.filter { ["lecture", "rangement", "refuse"].contains($0["statut"]?.texte ?? "") }.count
-        return ["documents": .liste(docs), "a_traiter": .nombre(Double(aTraiter)), "hors_panneau": 0]
+        let panneau = docs.filter { ["lecture", "rangement", "refuse", "banc"].contains($0["statut"]?.texte ?? "") }
+        let ranges = docs.filter { ["range", "envoye", "doublon"].contains($0["statut"]?.texte ?? "") }
+        let iso = ISO8601DateFormatter()
+        let recents = ranges.filter { d in
+            d["range_le"]?.texte.flatMap(iso.date(from:)).map { Date.now.timeIntervalSince($0) < 15 * 60 } ?? false
+        }
+        let aRevoir = Double(panneau.filter { $0["statut"] == "refuse" }.count)
+        return [
+            "documents": .liste(panneau), "recents": .liste(recents), "a_revoir": .nombre(aRevoir),
+            "a_traiter": .nombre(aRevoir), "hors_panneau": .nombre(Double(ranges.count - recents.count)),
+            "paperless_liste": "https://docs.paperless-ngx.com",
+        ]
     }
 
     func notifications() -> ValeurJSON {
         ["notifications": .liste(notifs), "non_lues": .nombre(Double(notifs.filter { $0["lu"] == false }.count))]
     }
 
-    /// Un dépôt de la démo : le nom du fichier est relu dans le corps ; la fiche est « rangée » d'emblée.
-    func deposer(_ corps: Data) -> Bool {
+    /// Un dépôt de la démo : le nom du fichier est relu dans le corps ; la fiche est « rangée » d'emblée (dans les
+    /// récents, avec son lien) ; rend la fiche (202).
+    func deposer(_ corps: Data) -> ValeurJSON? {
         let texte = String(decoding: corps.prefix(4096), as: UTF8.self)
-        guard let r = texte.range(of: #"filename="([^"]+)""#, options: .regularExpression) else { return false }
+        guard let r = texte.range(of: #"filename="([^"]+)""#, options: .regularExpression) else { return nil }
         let nom = texte[r].dropFirst("filename=\"".count).dropLast()
         depots += 1
         // 23.10 : les étiquettes du dépôt (un n° de la liste, ou un nom nouveau), posées d'emblée dans la démo
@@ -141,15 +156,16 @@ actor AnnexesDemo {
             guard let valeur = bout.components(separatedBy: "\r\n").first, !valeur.isEmpty else { return nil }
             return .texte(noms[valeur] ?? valeur)
         }
-        docs.insert(
-            [
-                "id": .texte("demo-depot-\(depots)"), "nom": .texte(String(nom)), "etat": "pret", "statut": "range",
-                "resume": "Document de démonstration : rien n’a quitté l’appareil.",
-                "paperless": ["etat": "range", "document": .nombre(Double(depots + 1))],
-                "etiquettes": .liste(etiquettes),
-                "depose_le": .texte(ISO8601DateFormatter().string(from: .now)),
-            ], at: 0)
-        return true
+        let maintenant = ISO8601DateFormatter().string(from: .now)
+        let fiche: ValeurJSON = [
+            "id": .texte("demo-depot-\(depots)"), "nom": .texte(String(nom)), "etat": "pret", "statut": "range",
+            "resume": "Document de démonstration : rien n’a quitté l’appareil.",
+            "paperless": ["etat": "range", "document": .nombre(Double(depots + 1))],
+            "etiquettes": .liste(etiquettes), "lien": "https://docs.paperless-ngx.com",
+            "depose_le": .texte(maintenant), "range_le": .texte(maintenant),
+        ]
+        docs.insert(fiche, at: 0)
+        return fiche
     }
 
     /// « Réessayer » : le refus de la démo devient un document rangé (202) ; 409 s'il n'y a rien à réessayer.
@@ -159,6 +175,7 @@ actor AnnexesDemo {
         else { return docs.contains { $0["id"]?.texte == id } ? 409 : 404 }
         o["etat"] = "pret"
         o["statut"] = "range"
+        o["range_le"] = .texte(ISO8601DateFormatter().string(from: .now))
         o["resume"] = "Document de démonstration : lu au deuxième essai."
         for cle in ["refus", "motif", "reessayer"] { o[cle] = nil }
         docs[i] = .objet(o)

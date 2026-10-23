@@ -143,6 +143,9 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         case refuse
         /// Un document de banc (essais) : jamais rangé dans Paperless.
         case banc
+        /// 23.10 (soir) : déjà présent dans Paperless — un avertissement, pas un refus (une étiquette en plus y est
+        /// ajoutée) ; il quitte le panneau comme un rangé.
+        case doublon
         /// Un relais plus ancien : lu et résumé, sans archivage connu.
         case lu
     }
@@ -176,8 +179,14 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
     public let dejaArchive: Bool
     /// 23.10 : le résumé attend (« pc » : le PC d'Alfred est éteint ; « file » : son tour vient).
     public let resumeAttente: String?
-    /// 23.10 : quand une carte rangée quitte le panneau (ISO 8601).
-    public let quitteLe: String?
+    /// 23.10 (soir) : quand le document a été rangé dans Paperless (ISO 8601), pour les cartes `recents` ; un document
+    /// rangé quitte le panneau aussitôt (le champ `quitte_le` du midi n'existe plus).
+    public let rangeLe: String?
+    /// 23.10 (soir) : l'avertissement d'un doublon, prêt à afficher (« déjà présent dans Paperless — étiquette « X »
+    /// ajoutée », « déjà archivé »…), et les étiquettes en plus ajoutées ou non à l'exemplaire existant.
+    public let avertissement: String?
+    public let etiquettesAjoutees: [String]
+    public let etiquettesNonAjoutees: [String]
     /// 23.10 : les étiquettes du document (posées, ou en attente du rangement) et celles que Paperless n'a pas posées.
     public let etiquettes: [String]
     public let etiquettesNonPosees: [String]
@@ -186,8 +195,9 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         id: String, nom: String, etat: String, resume: String? = nil, erreur: String? = nil, deposeLe: String? = nil,
         pourLe: String? = nil, paperless: Bool = false, alerte: String? = nil, statut: String? = nil,
         motif: String? = nil, refus: String? = nil, reessayer: Bool = false, lien: URL? = nil,
-        dejaArchive: Bool = false, resumeAttente: String? = nil, quitteLe: String? = nil, etiquettes: [String] = [],
-        etiquettesNonPosees: [String] = []
+        dejaArchive: Bool = false, resumeAttente: String? = nil, rangeLe: String? = nil, etiquettes: [String] = [],
+        etiquettesNonPosees: [String] = [], avertissement: String? = nil, etiquettesAjoutees: [String] = [],
+        etiquettesNonAjoutees: [String] = []
     ) {
         self.id = id
         self.nom = nom
@@ -205,9 +215,12 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         self.lien = Self.web(lien)
         self.dejaArchive = dejaArchive
         self.resumeAttente = resumeAttente
-        self.quitteLe = quitteLe
+        self.rangeLe = rangeLe
         self.etiquettes = etiquettes
         self.etiquettesNonPosees = etiquettesNonPosees
+        self.avertissement = avertissement
+        self.etiquettesAjoutees = etiquettesAjoutees
+        self.etiquettesNonAjoutees = etiquettesNonAjoutees
     }
 
     enum CodingKeys: String, CodingKey {
@@ -218,9 +231,12 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         case pourLe = "pour_le"
         case statutBrut = "statut"
         case etiquettesNonPosees = "etiquettes_non_posees"
+        case avertissement
+        case etiquettesAjoutees = "etiquettes_ajoutees"
+        case etiquettesNonAjoutees = "etiquettes_non_ajoutees"
         case dejaArchive = "deja_archive"
         case resumeAttente = "resume_attente"
-        case quitteLe = "quitte_le"
+        case rangeLe = "range_le"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -243,9 +259,12 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         lien = Self.web((try? c.decodeIfPresent(String.self, forKey: .lien)).flatMap(URL.init(string:)))
         dejaArchive = (try? c.decodeIfPresent(ValeurJSON.self, forKey: .dejaArchive)).map(Self.vrai) ?? false
         resumeAttente = try? c.decodeIfPresent(String.self, forKey: .resumeAttente)
-        quitteLe = try? c.decodeIfPresent(String.self, forKey: .quitteLe)
+        rangeLe = try? c.decodeIfPresent(String.self, forKey: .rangeLe)
         etiquettes = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettes))
         etiquettesNonPosees = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettesNonPosees))
+        avertissement = try? c.decodeIfPresent(String.self, forKey: .avertissement)
+        etiquettesAjoutees = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettesAjoutees))
+        etiquettesNonAjoutees = Self.textes(try? c.decodeIfPresent(ValeurJSON.self, forKey: .etiquettesNonAjoutees))
     }
 
     /// Une liste de noms (23.10), tolérante : ce qui n'est pas un texte non vide est sauté.
@@ -322,6 +341,7 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
         case .envoye: return "Envoyé à Paperless" + attente
         case .refuse: return "Refusé : " + motifRefus
         case .banc: return "Lu (banc : pas rangé dans Paperless)"
+        case .doublon: return "Déjà présent : " + (avertissement ?? "déjà présent dans Paperless")
         case .lu: return nil
         }
     }
@@ -365,45 +385,286 @@ public struct DocumentMaison: Sendable, Equatable, Identifiable, Decodable {
 }
 
 public struct ListeDocuments: Sendable, Equatable, Decodable {
+    /// Le panneau : en lecture, en rangement, refusés, banc (23.10, soir : un document rangé le quitte aussitôt).
     public let documents: [DocumentMaison]
-    /// 23.10 : ce qui demande une action ou attend (en cours, refusés), selon le relais ; nil : relais plus ancien.
+    /// 23.10 (soir) : les documents rangés ou envoyés depuis moins de 15 min (`range_le`, `lien`) : ils confirment un
+    /// lot ; absents d'un relais plus ancien.
+    public let recents: [DocumentMaison]
+    /// 23.10 (soir) : les refusés (la section « À revoir ») ; nil : relais plus ancien.
+    public let aRevoir: Int?
+    /// 23.10 : ce que le relais compte « à traiter » (= `a_revoir` depuis le soir, pour l'ancienne app).
     public let aTraiter: Int?
-    /// 23.10 : les fiches gardées à la maison mais hors du panneau (rangées depuis plus de 24 h).
+    /// 23.10 : les fiches gardées à la maison mais hors du panneau.
     public let horsPanneau: Int?
+    /// 23.10 (soir) : la liste de Paperless, derniers ajoutés en tête (le lien « voir » de plusieurs documents rangés).
+    public let paperlessListe: URL?
 
-    public init(documents: [DocumentMaison], aTraiter: Int? = nil, horsPanneau: Int? = nil) {
+    public init(
+        documents: [DocumentMaison], recents: [DocumentMaison] = [], aRevoir: Int? = nil, aTraiter: Int? = nil,
+        horsPanneau: Int? = nil, paperlessListe: URL? = nil
+    ) {
         self.documents = documents
+        self.recents = recents
+        self.aRevoir = aRevoir
         self.aTraiter = aTraiter
         self.horsPanneau = horsPanneau
+        self.paperlessListe = DocumentMaison.web(paperlessListe)
     }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         documents = try c.decodeIfPresent([DocumentMaison].self, forKey: .documents) ?? []
+        // tolérant : une liste illisible ne perd jamais le panneau
+        recents = (try? c.decodeIfPresent([DocumentMaison].self, forKey: .recents)) ?? []
+        aRevoir = try? c.decodeIfPresent(Int.self, forKey: .aRevoir)
         aTraiter = try? c.decodeIfPresent(Int.self, forKey: .aTraiter)
         horsPanneau = try? c.decodeIfPresent(Int.self, forKey: .horsPanneau)
+        paperlessListe = DocumentMaison.web(
+            (try? c.decodeIfPresent(String.self, forKey: .paperlessListe)).flatMap(URL.init(string:)))
     }
 
     enum CodingKeys: String, CodingKey {
-        case documents
+        case documents, recents
+        case aRevoir = "a_revoir"
         case aTraiter = "a_traiter"
         case horsPanneau = "hors_panneau"
+        case paperlessListe = "paperless_liste"
     }
 
-    /// La pastille de l'en-tête (23.10) : ce que le relais compte à traiter (sinon les cartes en lecture, en rangement
-    /// ou refusées), plus les refus de l'appareil (trop lourd, type), qui n'ont jamais quitté l'app.
-    public func pastille(refusLocaux: Int = 0) -> Int {
-        max(0, aTraiter ?? documents.filter(\.aTraiter).count) + refusLocaux
+    /// Les cartes « À revoir » : les refusés.
+    public var refuses: [DocumentMaison] { documents.filter { $0.statut == .refuse } }
+
+    /// Les cartes du relais encore « en cours » (lecture, rangement) et celles d'un banc.
+    public var enCours: [DocumentMaison] { documents.filter { [.lecture, .rangement, .banc].contains($0.statut) } }
+
+    /// La pastille de l'en-tête (23.10, soir) : les lignes « À envoyer » (valables ou refusées), plus « À revoir » —
+    /// les refusés du relais (`a_revoir`, sinon comptés ici) et les refus de l'app au dépôt (400, 413, 415, envoi coupé).
+    public func pastille(aEnvoyer: Int = 0, refusLocaux: Int = 0) -> Int {
+        max(0, aEnvoyer) + max(0, aRevoir ?? refuses.count) + max(0, refusLocaux)
     }
 
-    /// Le rythme de relecture de la console (23.10) : 2,5 s tant qu'une carte est en lecture ou en rangement, 10 s si
-    /// un résumé est en file, 30 s si un résumé attend le PC (il s'affiche peu après son retour), sinon 60 s.
-    public var delaiRelecture: Duration {
-        if documents.contains(where: { [.lecture, .rangement].contains($0.statut) }) { return .milliseconds(2500) }
-        if documents.contains(where: { $0.resumeAttente == "file" }) { return .seconds(10) }
-        if documents.contains(where: { $0.resumeAttente == "pc" }) { return .seconds(30) }
+    /// Le rythme de relecture (23.10, soir) : 2,5 s tant qu'un fichier est en cours (envoyé par l'app, ou une carte du
+    /// relais en lecture ou en rangement), sinon 60 s.
+    public func delaiRelecture(lotEnCours: Bool = false) -> Duration {
+        if lotEnCours || documents.contains(where: { [.lecture, .rangement].contains($0.statut) }) {
+            return .milliseconds(2500)
+        }
         return .seconds(60)
     }
+}
+
+// MARK: - à envoyer (23.10, soir)
+
+/// Le type d'un fichier d'après ses premiers octets, comme le relais (`documents._type`) : PDF, JPEG, PNG, WebP par leur
+/// signature ; e-mail par l'extension `.eml` ou le type déclaré ; texte par `.txt`, `.md` ou un type `text/…` ; nil :
+/// type non pris en charge.
+public enum TypeDocument {
+    public static func detecter(nom: String, entete: Data, typeDeclare: String? = nil) -> String? {
+        let o = [UInt8](entete.prefix(16))
+        let ext = (nom as NSString).pathExtension.lowercased()
+        let declare = (typeDeclare ?? "").lowercased()
+        if o.starts(with: Array("%PDF".utf8)) { return "application/pdf" }
+        if o.starts(with: [0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
+        if o.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if o.count >= 12, o.starts(with: Array("RIFF".utf8)), Array(o[8..<12]) == Array("WEBP".utf8) {
+            return "image/webp"
+        }
+        if ext == "eml" || declare == "message/rfc822" { return "message/rfc822" }
+        if ext == "txt" || ext == "md" || declare.hasPrefix("text/") { return "text/plain" }
+        return nil
+    }
+}
+
+/// La taille d'un fichier comme la console l'écrit : « 340 ko » (arrondi, 1 au moins), « 1,2 Mo » (une décimale,
+/// virgule) ; 1 ko = 1 024 octets, comme la limite de 20 Mo du relais.
+public enum TailleDocument {
+    public static func texte(_ octets: Int) -> String {
+        let mo = 1024 * 1024
+        if octets < mo { return "\(max(1, Int((Double(octets) / 1024).rounded()))) ko" }
+        let dixiemes = Int((Double(octets) / Double(mo) * 10).rounded())
+        return "\(dixiemes / 10),\(dixiemes % 10) Mo"
+    }
+}
+
+/// Une ligne de « À envoyer » (23.10, soir) : un fichier choisi, rien n'est encore parti. Refusé d'emblée s'il est trop
+/// lourd ou d'un type que le relais refuserait.
+public struct FichierAEnvoyer: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let nom: String
+    public let octets: Int
+    /// Le type que le relais reconnaîtra (nil : refusé).
+    public let type: String?
+    public let refus: RefusLocal.Motif?
+
+    /// `entete` : les premiers octets du fichier (16 suffisent) ; `typeDeclare` : le type annoncé par l'appareil.
+    public init(nom: String, octets: Int, entete: Data, typeDeclare: String? = nil, id: UUID = UUID()) {
+        self.id = id
+        self.nom = nom
+        self.octets = octets
+        if octets > DepotDocument.tailleMax {
+            type = nil
+            refus = .taille
+        } else if let t = TypeDocument.detecter(nom: nom, entete: entete, typeDeclare: typeDeclare) {
+            type = t
+            refus = nil
+        } else {
+            type = nil
+            refus = .type
+        }
+    }
+
+    public var valable: Bool { refus == nil }
+
+    /// « devis.pdf · 340 ko ».
+    public var ligne: String { nom + " · " + TailleDocument.texte(octets) }
+
+    /// « Refusé : trop lourd (20 Mo au plus) », « Refusé : type non pris en charge (…) », ou nil.
+    public var texteRefus: String? { refus.map { RefusLocal(nom: nom, motif: $0).texte } }
+}
+
+/// Le suivi d'un lot envoyé (23.10, soir) : chaque fichier « Envoi… » (requête en route), puis « Rangement… » (la carte
+/// du relais en lecture ou en rangement), jusqu'à ce qu'il apparaisse dans `recents` (rangé) ; refusé, il passe dans
+/// « À revoir » (une carte du relais, ou un refus de l'app au dépôt).
+public struct SuiviLot: Sendable, Equatable {
+    public enum Etat: Sendable, Equatable {
+        case envoi
+        case rangement(String)
+        case range(String)
+        /// 23.10 (soir) : déjà présent dans Paperless (un avertissement, pas un refus).
+        case doublon(String)
+        /// Refusé, coupé, ou disparu du relais : plus « en cours », pas compté comme rangé.
+        case fini
+    }
+
+    public struct Fichier: Sendable, Equatable, Identifiable {
+        public let id: UUID
+        public let nom: String
+        public var etat: Etat
+    }
+
+    public private(set) var fichiers: [Fichier] = []
+
+    public init() {}
+
+    /// Un nouveau lot : le précédent est oublié (sa confirmation aussi).
+    public mutating func nouveau() { fichiers = [] }
+
+    public mutating func envoi(_ id: UUID, nom: String) { fichiers.append(Fichier(id: id, nom: nom, etat: .envoi)) }
+
+    /// Le relais a reçu le fichier (202) : sa fiche porte son identifiant (sans lui, on ne peut plus le suivre).
+    public mutating func recu(_ id: UUID, document: String?) {
+        changer(id) { $0 = document.map(Etat.rangement) ?? .fini }
+    }
+
+    /// Refusé au dépôt (400, 413, 415) ou envoi coupé : plus en cours.
+    public mutating func echec(_ id: UUID) { changer(id) { $0 = .fini } }
+
+    private mutating func changer(_ id: UUID, _ f: (inout Etat) -> Void) {
+        if let i = fichiers.firstIndex(where: { $0.id == id }) { f(&fichiers[i].etat) }
+    }
+
+    /// Une relecture du relais : rangé s'il est dans `recents` ; fini s'il est refusé ou n'est plus nulle part. Rend
+    /// true si un document vient d'être rangé.
+    @discardableResult
+    public mutating func maj(_ liste: ListeDocuments) -> Bool {
+        var nouveau = false
+        for i in fichiers.indices {
+            guard case .rangement(let d) = fichiers[i].etat else { continue }
+            if let carte = liste.recents.first(where: { $0.id == d }) {
+                fichiers[i].etat = carte.statut == .doublon ? .doublon(d) : .range(d)
+                nouveau = true
+            } else if let carte = liste.documents.first(where: { $0.id == d }) {
+                if ![.lecture, .rangement].contains(carte.statut) { fichiers[i].etat = .fini }
+            } else {
+                fichiers[i].etat = .fini
+            }
+        }
+        return nouveau
+    }
+
+    /// Les identifiants du relais suivis ici (leurs cartes ne se montrent pas une 2e fois dans « En cours »).
+    public var documentsSuivis: Set<String> {
+        Set(
+            fichiers.compactMap {
+                if case .rangement(let d) = $0.etat { return d }
+                return nil
+            })
+    }
+
+    /// Un fichier du lot est encore en cours (relecture toutes les 2,5 s).
+    public var enCours: Bool { fichiers.contains { $0.etat == .envoi || $0.etatRangement } }
+
+    /// Les lignes « En cours » du lot : « <nom> — Envoi… », « <nom> — Rangement… ».
+    public var lignes: [String] {
+        fichiers.compactMap { f in
+            switch f.etat {
+            case .envoi: f.nom + " — Envoi…"
+            case .rangement: f.nom + " — Rangement…"
+            case .range, .doublon, .fini: nil
+            }
+        }
+    }
+
+    /// La ligne de confirmation (23.10, soir), pour les documents de CE lot arrivés dans les récents — R rangés, D déjà
+    /// présents (doublons, un avertissement) — avec les mots de la console :
+    /// « 1 document rangé dans Paperless », « 3 documents rangés dans Paperless, 2 déjà présents », « 1 document rangé
+    /// dans Paperless, 1 déjà présent (étiquette « X » ajoutée) », « 1 document déjà présent dans Paperless — étiquette
+    /// « X » ajoutée », « 2 documents déjà présents dans Paperless » ; « voir » : la fiche d'un document seul (s'il en a
+    /// une), la liste de Paperless pour plusieurs. nil si aucun.
+    public func confirmation(_ liste: ListeDocuments) -> ConfirmationRangement? {
+        var ranges: [String] = []
+        var doublons: [String] = []
+        for f in fichiers {
+            switch f.etat {
+            case .range(let d): ranges.append(d)
+            case .doublon(let d): doublons.append(d)
+            default: break
+            }
+        }
+        let (r, n) = (ranges.count, doublons.count)
+        guard r + n > 0 else { return nil }
+        let avertissement = doublons.first.flatMap { d in liste.recents.first { $0.id == d }?.avertissement }
+        let texte: String
+        if n == 0 {
+            texte = r == 1 ? "1 document rangé dans Paperless" : "\(r) documents rangés dans Paperless"
+        } else if r > 0 {
+            var t = r == 1 ? "1 document rangé dans Paperless, " : "\(r) documents rangés dans Paperless, "
+            t += n == 1 ? "1 déjà présent" : "\(n) déjà présents"
+            if n == 1, let a = avertissement, let tiret = a.range(of: " — ") {
+                let suite = a[tiret.upperBound...].trimmingCharacters(in: .whitespaces)
+                if !suite.isEmpty { t += " (" + suite + ")" }
+            }
+            texte = t
+        } else if n == 1 {
+            texte = "1 document " + (avertissement ?? "déjà présent dans Paperless")
+        } else {
+            texte = "\(n) documents déjà présents dans Paperless"
+        }
+        let seul = r + n == 1 ? (ranges + doublons).first : nil
+        let lien = seul.map { d in liste.recents.first { $0.id == d }?.lien } ?? liste.paperlessListe
+        return ConfirmationRangement(texte: texte, lien: lien)
+    }
+}
+
+extension SuiviLot.Fichier {
+    fileprivate var etatRangement: Bool {
+        if case .rangement = etat { return true }
+        return false
+    }
+}
+
+/// « 3 documents rangés dans Paperless — voir » : le texte, et le lien de « voir » (nil : pas de lien).
+public struct ConfirmationRangement: Sendable, Equatable {
+    public let texte: String
+    public let lien: URL?
+
+    public init(texte: String, lien: URL?) {
+        self.texte = texte
+        self.lien = lien
+    }
+
+    /// Le texte complet, « voir » compris quand il y a un lien.
+    public var ligne: String { lien == nil ? texte : texte + " — voir" }
 }
 
 // MARK: - étiquettes (23.10)
@@ -614,6 +875,10 @@ public struct RefusLocal: Sendable, Equatable, Identifiable {
         case taille, type
         /// 23.10 : un refus du relais (400) avec son texte lisible (étiquette inconnue, nom réservé…).
         case relais(String)
+        /// 23.10 (soir) : l'envoi n'a pas abouti (réseau, maison muette) ; la raison courte.
+        case envoiCoupe(String)
+        /// 23.10 (soir) : le fichier n'a plus pu être lu au moment de l'envoi.
+        case illisible
     }
 
     public let id: UUID
@@ -647,6 +912,8 @@ public struct RefusLocal: Sendable, Equatable, Identifiable {
         case .taille: "Refusé : trop lourd (20 Mo au plus)"
         case .type: "Refusé : type non pris en charge (PDF, image, texte ou e-mail)"
         case .relais(let t): "Refusé : " + t
+        case .envoiCoupe(let r): "Refusé : envoi coupé (\(r))"
+        case .illisible: "Refusé : ce fichier n’a pas pu être lu"
         }
     }
 }

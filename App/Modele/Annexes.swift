@@ -21,6 +21,13 @@ final class Annexes {
     }
 
     private(set) var documents: [DocumentMaison] = []
+    /// 23.10 (soir, retour d'essai : « ajouter les docs, choisir le tag et cliquer sur envoyer ») : « À envoyer », les
+    /// fichiers choisis — rien n'est parti ; le lot envoyé, ses lignes sont retirées.
+    private(set) var aEnvoyer: [FichierAEnvoyer] = []
+    /// 23.10 (soir) : le dernier lot envoyé, fichier par fichier (« En cours », puis la confirmation).
+    private(set) var suivi = SuiviLot()
+    /// 23.10 (soir) : « 3 documents rangés dans Paperless — voir » ; disparaît seule après 60 s, ou au prochain ajout.
+    private(set) var confirmation: ConfirmationRangement?
     /// 23.10 : les fichiers refusés par l'appareil ou au dépôt (trop lourd, type) : une carte locale, jusqu'à « Retirer ».
     private(set) var refusLocaux: [RefusLocal] = []
     /// 23.10 : la pastille de l'en-tête : ce qui demande une action (en cours, refusés), refus locaux compris.
@@ -55,8 +62,11 @@ final class Annexes {
     @ObservationIgnored private let aviser: @MainActor (String, Conversation.Avis.Genre) -> Void
     @ObservationIgnored private var taches: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var connecte = false
-    /// La dernière liste du relais (pour la pastille : son compte `a_traiter`).
+    /// La dernière liste du relais (pour la pastille : son compte `a_revoir`).
     @ObservationIgnored private var listeDocuments: ListeDocuments?
+    /// 23.10 (soir) : d'où lire chaque fichier valable de « À envoyer » au moment de l'envoi.
+    @ObservationIgnored private var sources: [UUID: SourceFichier] = [:]
+    @ObservationIgnored private var finConfirmation: Task<Void, Never>?
     /// Les relectures tournent.
     @ObservationIgnored private var actif = false
     /// L'app est cachée : rien ne repart avant `reprendre()`, même une reconnexion.
@@ -173,8 +183,10 @@ final class Annexes {
                 if accesDocuments != .ouvert { accesDocuments = .ouvert }
                 if liste.documents != documents { documents = liste.documents }
                 listeDocuments = liste
+                // 23.10 (soir) : un document du lot apparu dans les récents n'est plus « en cours » ; la confirmation suit
+                if suivi.maj(liste) { confirmer(suivi.confirmation(liste)) }
                 compterDocuments()
-                return liste.delaiRelecture
+                return liste.delaiRelecture(lotEnCours: envoiEnCours || suivi.enCours)
             case 401:
                 documents = []
                 listeDocuments = nil
@@ -254,16 +266,55 @@ final class Annexes {
 
     // MARK: - actions
 
-    /// Dépose un document (20 Mo au plus) ; la liste se relit ensuite.
-    func deposer(_ depot: DepotDocument) async {
-        await deposer(lot: LotDepot(pourLe: depot.pourLe, total: 1)) { _ in depot }
+    /// 23.10 (soir) : un fichier choisi rejoint « À envoyer » (rien ne part) ; un refus immédiat (trop lourd, type) y
+    /// reste, écrit dans sa ligne. La confirmation du lot précédent disparaît.
+    func ajouter(_ fichier: FichierAEnvoyer, source: SourceFichier) {
+        aEnvoyer.append(fichier)
+        if fichier.valable { sources[fichier.id] = source }
+        confirmer(nil)
+        compterDocuments()
     }
 
-    /// 23.10 : dépose un LOT (plusieurs fichiers choisis d'un coup), un fichier à la fois, comme la console : chacun est
-    /// préparé (lu, converti) juste avant son envoi — un seul en mémoire —, puis envoyé ; `preparer` rend nil pour un
-    /// fichier illisible ou déjà refusé (il l'a signalé). Un fichier trop lourd, ou refusé par le relais (413, 415),
-    /// devient une carte « Refusé » de l'app ; un échec d'envoi est signalé, et le lot continue. La liste se relit
-    /// ensuite.
+    /// « Retirer <nom> de la liste » (un toucher) : rien n'était parti.
+    func retirerAEnvoyer(_ id: UUID) {
+        aEnvoyer.removeAll { $0.id == id }
+        sources[id] = nil
+        compterDocuments()
+    }
+
+    /// 23.10 (soir) : « Envoyer à Paperless (n) » — les fichiers valables de « À envoyer », un POST chacun, avec les
+    /// étiquettes et le jour du lot ; puis les lignes de ce lot (valables ou refusées) quittent « À envoyer ».
+    func envoyer(etiquettes: [String], pourLe: String?) async {
+        let lot = aEnvoyer
+        let valables = lot.filter(\.valable)
+        guard !envoiEnCours, !valables.isEmpty else { return }
+        suivi.nouveau()
+        confirmer(nil)
+        let depot = LotDepot(pourLe: pourLe, total: valables.count, etiquettes: etiquettes)
+        let sources = sources
+        await deposer(lot: depot) { rang in
+            let f = valables[rang]
+            guard let donnees = sources[f.id]?.lire(), let type = f.type else {
+                refuserLocalement(RefusLocal(nom: f.nom, motif: .illisible))
+                return nil
+            }
+            return depot.depot(fichier: donnees, nomFichier: f.nom, type: type)
+        }
+        let partis = Set(lot.map(\.id))
+        aEnvoyer.removeAll { partis.contains($0.id) }
+        for id in partis { self.sources[id] = nil }
+        compterDocuments()
+    }
+
+    /// Dépose un document (20 Mo au plus) ; la liste se relit ensuite.
+    func deposer(_ depot: DepotDocument) async {
+        await deposer(lot: LotDepot(pourLe: depot.pourLe, total: 1, etiquettes: depot.etiquettes)) { _ in depot }
+    }
+
+    /// 23.10 : dépose un LOT, un fichier à la fois, comme la console : chacun est préparé (lu) juste avant son envoi — un
+    /// seul en mémoire —, puis envoyé et suivi (« Envoi… », puis « Rangement… » d'après sa fiche) ; `preparer` rend nil
+    /// pour un fichier illisible (il l'a signalé). Refusé par le relais (400, 413, 415) ou coupé en route : une carte
+    /// « Refusé » de l'app, dans « À revoir » ; le lot continue. La liste se relit après chaque fichier.
     func deposer(lot: LotDepot, preparer: @MainActor (Int) async -> DepotDocument?) async {
         guard !envoiEnCours, lot.total > 0 else { return }
         envoiEnCours = true
@@ -276,18 +327,23 @@ final class Annexes {
                 refuserLocalement(RefusLocal(nom: depot.nomFichier, motif: .taille))
                 continue
             }
+            let cle = UUID()
+            suivi.envoi(cle, nom: depot.nomFichier)
             etatDepot = lot.etatEnvoi(depot.nomFichier, rang: rang + 1)
             do {
                 let (statut, corps) = try await acces.envoyer(depot.requete())
                 // 413, 415, et 400 avec le texte du relais (23.10 : une étiquette refusée) : une carte « Refusé »
                 if let refus = RefusLocal(nom: depot.nomFichier, statut: statut, corps: corps) {
+                    suivi.echec(cle)
                     refuserLocalement(refus)
                     continue
                 }
                 guard (200..<300).contains(statut) else { throw ErreurRelais("HTTP \(statut)") }
+                suivi.recu(cle, document: Self.identifiant(corps))
                 recus += 1
             } catch {
-                signaler("Envoi impossible : " + Self.motif(error))
+                suivi.echec(cle)
+                refuserLocalement(RefusLocal(nom: depot.nomFichier, motif: .envoiCoupe(Self.motif(error))))
             }
             relireDocuments()
         }
@@ -302,8 +358,28 @@ final class Annexes {
         relireDocuments()
     }
 
-    /// 23.10 : un fichier refusé par l'appareil (trop lourd) ou au dépôt (413, 415) : une carte « Refusé » de l'app, et un
-    /// avis.
+    /// L'identifiant de la fiche rendue par le relais (202) ; nil s'il manque (le fichier n'est alors plus suivi).
+    static func identifiant(_ corps: Data) -> String? {
+        guard let objet = try? JSONSerialization.jsonObject(with: corps) as? [String: Any],
+            let id = objet["id"] as? String, !id.isEmpty
+        else { return nil }
+        return id
+    }
+
+    /// La ligne de confirmation : posée (60 s, relancées à chaque document rangé), ou retirée.
+    private func confirmer(_ c: ConfirmationRangement?) {
+        finConfirmation?.cancel()
+        if c != confirmation { confirmation = c }
+        guard c != nil else { return }
+        finConfirmation = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled else { return }
+            self?.confirmation = nil
+        }
+    }
+
+    /// 23.10 : un fichier refusé au dépôt (400, 413, 415, envoi coupé, illisible) : une carte « Refusé » de l'app dans
+    /// « À revoir », et un avis.
     func refuserLocalement(_ refus: RefusLocal) {
         refusLocaux.insert(refus, at: 0)
         compterDocuments()
@@ -327,8 +403,10 @@ final class Annexes {
         compterDocuments()
     }
 
+    /// La pastille (23.10, soir) : « À envoyer » (valables ou refusées) + « À revoir » (refusés du relais, refus au dépôt).
     private func compterDocuments() {
-        let n = (listeDocuments ?? ListeDocuments(documents: [])).pastille(refusLocaux: refusLocaux.count)
+        let n = (listeDocuments ?? ListeDocuments(documents: [])).pastille(
+            aEnvoyer: aEnvoyer.count, refusLocaux: refusLocaux.count)
         if n != pastilleDocuments { pastilleDocuments = n }
     }
 

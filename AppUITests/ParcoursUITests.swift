@@ -180,10 +180,12 @@ final class ParcoursUITests: XCTestCase {
         // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (le refus de la démo)
         XCTAssertTrue(documents.label.contains("1 à traiter"), documents.label)
         documents.tap()
-        XCTAssertTrue(element(app, contenant: "Facture d’exemple").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, contenant: "Rangé dans Paperless").exists)
+        // 23.10 (soir) : « À envoyer » vide, le bouton d'envoi désactivé, le refus de la démo dans « À revoir »
+        XCTAssertTrue(element(app, contenant: "Aucun document à envoyer.").waitForExistence(timeout: 5))
+        let envoyer = bouton(app, "envoyerPaperless")
+        XCTAssertTrue(envoyer.exists && !envoyer.isEnabled, "aucun fichier : « Envoyer à Paperless (0) » désactivé")
         XCTAssertTrue(element(app, contenant: "Refusé : aucun texte lisible").exists)
-        XCTAssertTrue(element(app, contenant: "Déposer un document").exists)
+        XCTAssertTrue(element(app, contenant: "Ajouter des documents").exists)
         // plus de « Supprimer » sur un document rangé
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Supprimer ")).firstMatch.exists)
         // « Retirer » se touche sur 44 pt au moins, pas seulement sur son texte (revue du 18.10, point 15)

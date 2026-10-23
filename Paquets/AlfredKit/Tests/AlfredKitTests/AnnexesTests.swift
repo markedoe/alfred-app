@@ -49,8 +49,8 @@ struct AnnexesTests {
         let d = l.documents
         #expect(d.map(\.statut) == [.range, .lu, .refuse, .lecture])
         #expect(l.aTraiter == nil && l.horsPanneau == nil)
-        #expect(l.pastille() == 2, "en lecture ou en erreur")
-        #expect(l.pastille(refusLocaux: 1) == 3)
+        #expect(l.pastille() == 1, "23.10 (soir) : les refusés seulement")
+        #expect(l.pastille(refusLocaux: 1) == 2 && l.pastille(aEnvoyer: 2, refusLocaux: 1) == 4)
         #expect(d[0].texteEtat == "Rangé dans Paperless" && d[1].texteEtat == nil)
         #expect(d[2].texteEtat == "Refusé : lecture impossible (illisible)")
         #expect(d[3].texteEtat == "Lecture en cours…" && d[3].resumeAffiche == nil)
@@ -58,7 +58,7 @@ struct AnnexesTests {
         // plus de « Supprimer » sur un document rangé ; un document que Paperless n'a pas peut encore être supprimé
         #expect(!d[0].peutSupprimer && d[1].peutSupprimer && !d[0].peutRetirer)
         #expect(d[2].peutRetirer && !d[2].peutReessayer, "l'ancien relais ne sait pas réessayer")
-        #expect(l.delaiRelecture == .milliseconds(2500))
+        #expect(l.delaiRelecture() == .milliseconds(2500))
     }
 
     @Test("Documents de la boîte d'arrivée (23.10) : verdicts, motifs, lien, attente du résumé, pastille du relais")
@@ -66,15 +66,15 @@ struct AnnexesTests {
         let l = try JSONDecoder().decode(
             ListeDocuments.self,
             from: Self.json(
-                #"{"a_traiter":3,"hors_panneau":7,"documents":[{"id":"r","nom":"facture","etat":"pret","statut":"range","lien":"https://paperless.exemple.invalid/documents/12/details","paperless":{"etat":"range","document":12},"resume":null,"resume_attente":"pc","quitte_le":"2026-10-24T09:00:00+02:00","reessayer":false},{"id":"e","nom":"offre","etat":"pret","statut":"envoye","paperless":{"etat":"envoye","document":null},"resume":"Une offre.","resume_attente":"file"},{"id":"i","nom":"photo floue","etat":"erreur","statut":"refuse","refus":"illisible","motif":"aucun texte lisible","reessayer":true,"erreur":"aucun texte lisible"},{"id":"dv","nom":"facture bis","etat":"pret","statut":"refuse","refus":"doublon","motif":"déjà dans Paperless","lien":"https://paperless.exemple.invalid/documents/12/details","reessayer":false},{"id":"dc","nom":"pièce","etat":"pret","statut":"refuse","refus":"doublon","deja_archive":true,"lien":"javascript:alert(1)"},{"id":"g","nom":"rangement","etat":"pret","statut":"rangement"},{"id":"b","nom":"banc","etat":"pret","statut":"banc","resume":"Banc."},{"id":"x","nom":"futur","etat":"pret","statut":"inconnu","paperless":{"etat":"range"}}]}"#
+                #"{"a_traiter":3,"hors_panneau":7,"documents":[{"id":"r","nom":"facture","etat":"pret","statut":"range","lien":"https://paperless.exemple.invalid/documents/12/details","paperless":{"etat":"range","document":12},"resume":null,"resume_attente":"pc","range_le":"2026-10-23T09:00:00+02:00","reessayer":false},{"id":"e","nom":"offre","etat":"pret","statut":"envoye","paperless":{"etat":"envoye","document":null},"resume":"Une offre.","resume_attente":"file"},{"id":"i","nom":"photo floue","etat":"erreur","statut":"refuse","refus":"illisible","motif":"aucun texte lisible","reessayer":true,"erreur":"aucun texte lisible"},{"id":"dv","nom":"facture bis","etat":"pret","statut":"refuse","refus":"doublon","motif":"déjà dans Paperless","lien":"https://paperless.exemple.invalid/documents/12/details","reessayer":false},{"id":"dc","nom":"pièce","etat":"pret","statut":"refuse","refus":"doublon","deja_archive":true,"lien":"javascript:alert(1)"},{"id":"g","nom":"rangement","etat":"pret","statut":"rangement"},{"id":"b","nom":"banc","etat":"pret","statut":"banc","resume":"Banc."},{"id":"x","nom":"futur","etat":"pret","statut":"inconnu","paperless":{"etat":"range"}}]}"#
             ))
         let d = l.documents
         #expect(d.map(\.statut) == [.range, .envoye, .refuse, .refuse, .refuse, .rangement, .banc, .range])
         #expect(l.aTraiter == 3 && l.horsPanneau == 7)
-        #expect(l.pastille() == 3, "le compte du relais d'abord")
+        #expect(l.pastille() == 3, "les trois refusés (sans « a_revoir » : comptés ici)")
         #expect(l.pastille(refusLocaux: 2) == 5)
         #expect(d[0].texteEtat == "Rangé dans Paperless — résumé quand le PC d’Alfred sera allumé")
-        #expect(d[0].lien?.host == "paperless.exemple.invalid" && d[0].paperless && d[0].quitteLe != nil)
+        #expect(d[0].lien?.host == "paperless.exemple.invalid" && d[0].paperless && d[0].rangeLe != nil)
         #expect(d[1].texteEtat == "Envoyé à Paperless — résumé en cours…" && d[1].resumeAffiche == "Une offre.")
         #expect(d[2].texteEtat == "Refusé : aucun texte lisible" && d[2].peutReessayer && d[2].peutRetirer)
         #expect(d[3].texteEtat == "Refusé : déjà dans Paperless" && !d[3].peutReessayer && d[3].lien != nil)
@@ -84,11 +84,10 @@ struct AnnexesTests {
         #expect(d[6].texteEtat == "Lu (banc : pas rangé dans Paperless)" && d[6].peutSupprimer)
         #expect(!d[0].peutSupprimer && !d[0].peutRetirer && !d[1].peutSupprimer, "rangé : ni Supprimer ni Retirer")
         #expect(d[7].statut == .range, "un statut inconnu : déduit comme l'ancienne console")
-        #expect(l.delaiRelecture == .milliseconds(2500), "une carte en rangement")
-        let file = ListeDocuments(documents: [d[1]])
-        #expect(file.delaiRelecture == .seconds(10), "un résumé en file")
-        #expect(ListeDocuments(documents: [d[0], d[2]]).delaiRelecture == .seconds(30), "un résumé attend le PC")
-        #expect(ListeDocuments(documents: [d[2], d[3]]).delaiRelecture == .seconds(60))
+        #expect(l.delaiRelecture() == .milliseconds(2500), "une carte en rangement")
+        #expect(
+            ListeDocuments(documents: [d[1]]).delaiRelecture() == .seconds(60), "23.10 (soir) : plus de 10 s ni 30 s")
+        #expect(ListeDocuments(documents: [d[2], d[3]]).delaiRelecture() == .seconds(60))
         // une valeur d'un autre type pour un champ nouveau ne perd jamais la liste
         let tolerant = try JSONDecoder().decode(
             ListeDocuments.self,
@@ -96,16 +95,114 @@ struct AnnexesTests {
         #expect(tolerant.aTraiter == nil && tolerant.documents[0].statut == .lu && tolerant.documents[0].reessayer)
     }
 
-    @Test("Relecture (23.10) : 2,5 s en lecture ou rangement, 10 s résumé en file, 30 s résumé qui attend le PC, 60 s")
+    @Test(
+        "Relecture (23.10, soir) : 2,5 s tant qu'un fichier est en cours (lot de l'app ou carte du relais), sinon 60 s")
     func relecture() {
         func d(_ statut: String, _ attente: String? = nil) -> DocumentMaison {
             DocumentMaison(id: statut, nom: statut, etat: "pret", statut: statut, resumeAttente: attente)
         }
-        #expect(ListeDocuments(documents: [d("range", "pc"), d("lecture")]).delaiRelecture == .milliseconds(2500))
-        #expect(ListeDocuments(documents: [d("range", "pc"), d("envoye", "file")]).delaiRelecture == .seconds(10))
-        #expect(ListeDocuments(documents: [d("range", "pc"), d("refuse")]).delaiRelecture == .seconds(30))
-        #expect(ListeDocuments(documents: [d("range"), d("refuse")]).delaiRelecture == .seconds(60))
-        #expect(ListeDocuments(documents: []).delaiRelecture == .seconds(60))
+        #expect(ListeDocuments(documents: [d("refuse"), d("lecture")]).delaiRelecture() == .milliseconds(2500))
+        #expect(ListeDocuments(documents: [d("rangement")]).delaiRelecture() == .milliseconds(2500))
+        #expect(ListeDocuments(documents: [d("refuse")]).delaiRelecture(lotEnCours: true) == .milliseconds(2500))
+        #expect(ListeDocuments(documents: [d("refuse"), d("banc")]).delaiRelecture() == .seconds(60))
+        #expect(ListeDocuments(documents: [d("envoye", "file"), d("range", "pc")]).delaiRelecture() == .seconds(60))
+        #expect(ListeDocuments(documents: []).delaiRelecture() == .seconds(60))
+    }
+
+    @Test("Liste du soir (23.10) : panneau, récents (range_le, lien), à revoir, liste de Paperless ; ancien format")
+    func listeDuSoir() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"documents":[{"id":"r1","nom":"photo","etat":"erreur","statut":"refuse","motif":"aucun texte lisible","reessayer":true},{"id":"c1","nom":"lettre","etat":"en cours","statut":"lecture"},{"id":"b1","nom":"banc","etat":"pret","statut":"banc"}],"recents":[{"id":"g1","nom":"facture","etat":"pret","statut":"range","range_le":"2026-10-23T18:00:00+02:00","lien":"https://paperless.exemple.invalid/documents/7/details"}],"a_revoir":1,"a_traiter":1,"hors_panneau":4,"paperless_liste":"https://paperless.exemple.invalid/documents?sort=added&reverse=1"}"#
+            ))
+        #expect(l.documents.map(\.id) == ["r1", "c1", "b1"] && l.recents.map(\.id) == ["g1"])
+        #expect(
+            l.recents[0].rangeLe == "2026-10-23T18:00:00+02:00" && l.recents[0].lien?.path == "/documents/7/details")
+        #expect(l.aRevoir == 1 && l.aTraiter == 1 && l.horsPanneau == 4)
+        #expect(l.paperlessListe?.host == "paperless.exemple.invalid")
+        #expect(l.refuses.map(\.id) == ["r1"] && l.enCours.map(\.id) == ["c1", "b1"])
+        #expect(l.pastille(aEnvoyer: 3, refusLocaux: 1) == 5)
+        // ancien format : ni récents, ni à revoir, ni liste ; une liste illisible ne perd jamais le panneau
+        let ancien = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"documents":[{"id":"a","etat":"pret"}],"recents":"x","paperless_liste":"javascript:alert(1)"}"#))
+        #expect(ancien.documents.count == 1 && ancien.recents.isEmpty && ancien.aRevoir == nil)
+        #expect(ancien.paperlessListe == nil, "http(s) seulement")
+    }
+
+    @Test("À envoyer (23.10, soir) : type par les premiers octets comme le relais, taille écrite, refus immédiats")
+    func aEnvoyer() {
+        let pdf = Data("%PDF-1.7".utf8)
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0])
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0])
+        let webp = Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVP8 ".utf8)
+        #expect(TypeDocument.detecter(nom: "a.bin", entete: pdf) == "application/pdf")
+        #expect(TypeDocument.detecter(nom: "photo", entete: jpeg) == "image/jpeg")
+        #expect(TypeDocument.detecter(nom: "x.png", entete: png) == "image/png")
+        #expect(TypeDocument.detecter(nom: "x", entete: webp) == "image/webp")
+        #expect(TypeDocument.detecter(nom: "Message.EML", entete: Data("From:".utf8)) == "message/rfc822")
+        #expect(TypeDocument.detecter(nom: "x", entete: Data(), typeDeclare: "message/rfc822") == "message/rfc822")
+        #expect(TypeDocument.detecter(nom: "notes.md", entete: Data("# a".utf8)) == "text/plain")
+        #expect(TypeDocument.detecter(nom: "liste", entete: Data("a".utf8), typeDeclare: "text/csv") == "text/plain")
+        #expect(TypeDocument.detecter(nom: "lettre.docx", entete: Data("PK\u{3}\u{4}".utf8)) == nil)
+        #expect(TypeDocument.detecter(nom: "a.pdf", entete: Data("PK".utf8)) == nil, "l'extension ne suffit pas")
+        #expect(TailleDocument.texte(340 * 1024) == "340 ko" && TailleDocument.texte(10) == "1 ko")
+        #expect(TailleDocument.texte(0) == "1 ko" && TailleDocument.texte(1536) == "2 ko")
+        #expect(TailleDocument.texte(1_258_291) == "1,2 Mo" && TailleDocument.texte(20 * 1024 * 1024) == "20,0 Mo")
+        let ok = FichierAEnvoyer(nom: "devis.pdf", octets: 340 * 1024, entete: pdf)
+        #expect(ok.valable && ok.type == "application/pdf" && ok.ligne == "devis.pdf · 340 ko" && ok.texteRefus == nil)
+        let gros = FichierAEnvoyer(nom: "plan.pdf", octets: DepotDocument.tailleMax + 1, entete: pdf)
+        #expect(!gros.valable && gros.texteRefus == "Refusé : trop lourd (20 Mo au plus)")
+        let docx = FichierAEnvoyer(nom: "lettre.docx", octets: 5000, entete: Data("PK".utf8))
+        #expect(docx.texteRefus == "Refusé : type non pris en charge (PDF, image, texte ou e-mail)")
+        #expect(RefusLocal(nom: "x", motif: .envoiCoupe("HTTP 502")).texte == "Refusé : envoi coupé (HTTP 502)")
+    }
+
+    @Test("Suivi d'un lot (23.10, soir) : Envoi…, Rangement…, rangé dans les récents ; confirmation 1 ou N ; refus")
+    func suiviLot() {
+        let (a, b, c, e) = (UUID(), UUID(), UUID(), UUID())
+        var s = SuiviLot()
+        s.envoi(a, nom: "a.pdf")
+        s.envoi(b, nom: "b.pdf")
+        #expect(s.lignes == ["a.pdf — Envoi…", "b.pdf — Envoi…"] && s.enCours)
+        s.recu(a, document: "d-a")
+        s.recu(b, document: "d-b")
+        s.envoi(c, nom: "c.pdf")
+        s.echec(c)
+        s.envoi(e, nom: "e.pdf")
+        s.recu(e, document: nil)
+        #expect(s.lignes == ["a.pdf — Rangement…", "b.pdf — Rangement…"] && s.documentsSuivis == ["d-a", "d-b"])
+        func carte(_ id: String, _ statut: String, lien: String? = nil) -> DocumentMaison {
+            DocumentMaison(id: id, nom: id, etat: "pret", statut: statut, lien: lien.flatMap(URL.init(string:)))
+        }
+        let liste = URL(string: "https://paperless.exemple.invalid/documents")
+        let l1 = ListeDocuments(
+            documents: [carte("d-b", "rangement")],
+            recents: [carte("d-a", "range", lien: "https://paperless.exemple.invalid/documents/1/details")],
+            paperlessListe: liste)
+        var nouveau = s.maj(l1)
+        #expect(nouveau && s.lignes == ["b.pdf — Rangement…"])
+        #expect(s.confirmation(l1)?.ligne == "1 document rangé dans Paperless — voir")
+        #expect(s.confirmation(l1)?.lien?.path == "/documents/1/details")
+        nouveau = s.maj(l1)
+        #expect(!nouveau, "rien de neuf")
+        let l2 = ListeDocuments(
+            documents: [], recents: [carte("d-b", "range"), carte("d-a", "range")], paperlessListe: liste)
+        nouveau = s.maj(l2)
+        #expect(nouveau && s.lignes.isEmpty && !s.enCours)
+        #expect(s.confirmation(l2) == ConfirmationRangement(texte: "2 documents rangés dans Paperless", lien: liste))
+        let sansLien = ConfirmationRangement(texte: "1 document rangé dans Paperless", lien: nil)
+        #expect(sansLien.ligne == "1 document rangé dans Paperless", "sans lien : pas de « voir »")
+        // refusé au relais : il passe dans « À revoir », plus en cours, pas compté
+        var r = SuiviLot()
+        r.envoi(a, nom: "a.pdf")
+        r.recu(a, document: "d-a")
+        r.maj(ListeDocuments(documents: [carte("d-a", "refuse")]))
+        #expect(r.lignes.isEmpty && r.confirmation(ListeDocuments(documents: [])) == nil)
+        r.nouveau()
+        #expect(r.fichiers.isEmpty)
     }
 
     @Test(
@@ -150,6 +247,77 @@ struct AnnexesTests {
         #expect(d[1].texteEtat == "Refusé : pas encore rangé dans Paperless" && d[1].peutReessayer)
         #expect(d[2].texteEtat == "Refusé : un motif nouveau" && d[2].peutReessayer, "code inconnu : un simple refus")
         #expect(l.pastille() == 3)
+    }
+
+    @Test("Doublon (23.10, soir) : un avertissement, pas un refus — décodé, hors pastille, sans bouton")
+    func doublon() throws {
+        let l = try JSONDecoder().decode(
+            ListeDocuments.self,
+            from: Self.json(
+                #"{"documents":[{"id":"r","etat":"erreur","statut":"refuse","motif":"aucun texte lisible","reessayer":true},{"id":"x","etat":"pret","statut":"doublon"}],"recents":[{"id":"d","nom":"facture","etat":"pret","statut":"doublon","refus":null,"reessayer":false,"range_le":"2026-10-23T18:00:00+02:00","avertissement":"déjà présent dans Paperless — étiquette « Assurances » ajoutée","etiquettes_ajoutees":["Assurances"],"etiquettes_non_ajoutees":["Banque"],"lien":"https://paperless.exemple.invalid/documents/3/details","deja_archive":false}],"a_revoir":1}"#
+            ))
+        let d = l.recents[0]
+        #expect(d.statut == .doublon && !d.aTraiter && !d.peutRetirer && !d.peutReessayer && !d.peutSupprimer)
+        #expect(d.avertissement == "déjà présent dans Paperless — étiquette « Assurances » ajoutée")
+        #expect(d.etiquettesAjoutees == ["Assurances"] && d.etiquettesNonAjoutees == ["Banque"] && d.rangeLe != nil)
+        #expect(l.refuses.map(\.id) == ["r"], "« À revoir » : les vrais échecs seulement")
+        #expect(
+            l.pastille() == 1 && ListeDocuments(documents: [l.documents[1]]).pastille() == 0, "pas dans la pastille")
+        #expect(!l.enCours.contains { $0.id == "x" })
+    }
+
+    @Test("Confirmation (23.10, soir) : rangés R, déjà présents D — chaque forme de la ligne, et son « voir »")
+    func confirmationFormes() {
+        let liste = URL(string: "https://paperless.exemple.invalid/documents")
+        func fiche(_ i: Int) -> URL? { URL(string: "https://paperless.exemple.invalid/documents/\(i)/details") }
+        let ajoutee = "déjà présent dans Paperless — étiquette « X » ajoutée"
+        func ligne(ranges: Int, doublons: [String?], liens: Bool = true) -> ConfirmationRangement? {
+            var s = SuiviLot()
+            var recents: [DocumentMaison] = []
+            for i in 0..<ranges {
+                let cle = UUID()
+                s.envoi(cle, nom: "r\(i)")
+                s.recu(cle, document: "r\(i)")
+                recents.append(
+                    DocumentMaison(
+                        id: "r\(i)", nom: "r\(i)", etat: "pret", statut: i == 1 ? "envoye" : "range",
+                        lien: liens ? fiche(i) : nil))
+            }
+            for (i, avertissement) in doublons.enumerated() {
+                let cle = UUID()
+                s.envoi(cle, nom: "d\(i)")
+                s.recu(cle, document: "d\(i)")
+                recents.append(
+                    DocumentMaison(
+                        id: "d\(i)", nom: "d\(i)", etat: "pret", statut: "doublon",
+                        lien: liens ? fiche(100 + i) : nil, avertissement: avertissement))
+            }
+            let l = ListeDocuments(documents: [], recents: recents, paperlessListe: liste)
+            s.maj(l)
+            return s.confirmation(l)
+        }
+        #expect(ligne(ranges: 0, doublons: []) == nil)
+        #expect(ligne(ranges: 1, doublons: [])?.ligne == "1 document rangé dans Paperless — voir")
+        #expect(ligne(ranges: 1, doublons: [])?.lien == fiche(0))
+        #expect(ligne(ranges: 1, doublons: [], liens: false)?.ligne == "1 document rangé dans Paperless")
+        #expect(ligne(ranges: 3, doublons: [])?.ligne == "3 documents rangés dans Paperless — voir")
+        #expect(ligne(ranges: 3, doublons: [])?.lien == liste)
+        #expect(
+            ligne(ranges: 1, doublons: ["déjà présent dans Paperless"])?.texte
+                == "1 document rangé dans Paperless, 1 déjà présent")
+        #expect(
+            ligne(ranges: 1, doublons: [ajoutee])?.texte
+                == "1 document rangé dans Paperless, 1 déjà présent (étiquette « X » ajoutée)")
+        #expect(
+            ligne(ranges: 3, doublons: [ajoutee, nil])?.texte == "3 documents rangés dans Paperless, 2 déjà présents")
+        #expect(ligne(ranges: 3, doublons: [ajoutee, nil])?.lien == liste)
+        #expect(
+            ligne(ranges: 0, doublons: [ajoutee])?.ligne
+                == "1 document déjà présent dans Paperless — étiquette « X » ajoutée — voir")
+        #expect(ligne(ranges: 0, doublons: [ajoutee])?.lien == fiche(100), "un seul : sa fiche")
+        #expect(ligne(ranges: 0, doublons: ["déjà archivé"], liens: false)?.ligne == "1 document déjà archivé")
+        #expect(ligne(ranges: 0, doublons: [nil])?.texte == "1 document déjà présent dans Paperless")
+        #expect(ligne(ranges: 0, doublons: [nil, ajoutee])?.ligne == "2 documents déjà présents dans Paperless — voir")
     }
 
     @Test("Étiquettes (23.10) : liste du relais, tolérante ; nettoyage d'un nom tapé ; clé sans casse ni accents")

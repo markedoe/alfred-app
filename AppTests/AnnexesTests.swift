@@ -26,11 +26,10 @@ struct AnnexesTests {
     @Test("Au démarrage : documents, notifications, liens et état des services")
     func demarrage() async throws {
         let a = try await Self.pretes()
-        #expect(a.documents.map(\.nom) == ["Facture d’exemple", "Photo floue d’exemple"])
-        #expect(a.documents.first?.paperless == true)
-        // 23.10 : la boîte d'arrivée — un rangé, un refusé ; la pastille ne compte que le refus
-        #expect(a.documents.map(\.statut) == [.range, .refuse])
-        #expect(a.pastilleDocuments == 1)
+        // 23.10 (soir) : un rangé quitte le panneau aussitôt — la démo n'y montre que son refusé
+        #expect(a.documents.map(\.nom) == ["Photo floue d’exemple"])
+        #expect(a.documents.map(\.statut) == [.refuse] && a.pastilleDocuments == 1, "la pastille : le refus")
+        #expect(a.aEnvoyer.isEmpty && a.confirmation == nil)
         #expect(a.nonLues == 1 && a.notifications.count == 2)
         #expect(a.liens.map(\.nom) == ["Home Assistant", "Paperless"])
         #expect(a.etat?.groupes.map(\.nomCourt) == ["maison", "voix", "nuit"])
@@ -38,71 +37,88 @@ struct AnnexesTests {
         a.suspendre()
     }
 
-    @Test("Dépôt, puis le refus réessayé et retiré (23.10) : la liste et la pastille suivent")
+    @Test("Dépôt (23.10, soir) : ajouté à « À envoyer », envoyé, rangé (hors du panneau), confirmé ; le refus réessayé")
     func depot() async throws {
         let a = try await Self.pretes()
-        await a.deposer(
-            DepotDocument(fichier: Data("%PDF-1.7".utf8), nomFichier: "devis.pdf", type: "application/pdf"))
-        try await Self.attendre { a.documents.count == 3 }
-        #expect(a.documents.first?.nom == "devis.pdf" && a.documents.first?.statut == .range)
-        #expect(a.etatDepot == "Reçu. Alfred le lit…")
+        let pdf = Data("%PDF-1.7".utf8)
+        a.ajouter(FichierAEnvoyer(nom: "devis.pdf", octets: pdf.count, entete: pdf), source: .donnees(pdf))
+        #expect(a.aEnvoyer.map(\.ligne) == ["devis.pdf · 1 ko"] && a.pastilleDocuments == 2, "à envoyer + à revoir")
+        await a.envoyer(etiquettes: [], pourLe: nil)
+        #expect(a.aEnvoyer.isEmpty, "le lot envoyé quitte « À envoyer »")
+        try await Self.attendre { a.confirmation != nil }
+        #expect(a.confirmation?.ligne == "1 document rangé dans Paperless — voir")
+        #expect(!a.documents.contains { $0.nom == "devis.pdf" }, "rangé : il quitte le panneau aussitôt")
+        #expect(a.suivi.lignes.isEmpty && a.pastilleDocuments == 1)
         let refuse = try #require(a.documents.first { $0.statut == .refuse })
         await a.reessayer(refuse)
         try await Self.attendre { a.pastilleDocuments == 0 }
-        #expect(a.documents.allSatisfy { $0.statut == .range })
+        #expect(a.documents.isEmpty)
         await a.reessayer(refuse)
         #expect(a.erreurDepot == "Nouvel essai impossible : rien à réessayer", "409 : rien à réessayer")
-        let depose = try #require(a.documents.first)
-        await a.retirer(depose)
-        try await Self.attendre { a.documents.count == 2 }
+        // le prochain ajout efface la confirmation
+        a.ajouter(FichierAEnvoyer(nom: "autre.pdf", octets: pdf.count, entete: pdf), source: .donnees(pdf))
+        #expect(a.confirmation == nil)
         a.suspendre()
     }
 
     @Test(
-        "Lot (23.10) : une requête par fichier, « Pour le » pour chacun, un fichier illisible sauté, 413/415 en cartes")
+        "Lot (23.10, soir) : un POST par fichier valable, « Pour le » et étiquettes pour chacun ; refus dans « À revoir » ; confirmation R et D"
+    )
     func lot() async throws {
         let acces = AccesDepotsDeTest()
-        let avis = Recueil()
-        let a = Annexes(acces: acces) { texte, _ in avis.textes.append(texte) }
+        let a = Annexes(acces: acces) { _, _ in }
         a.demarrer(connecte: true)
-        let lot = LotDepot(pourLe: "2026-10-24", total: 5)
-        let noms = ["a.pdf", "illisible", "b.txt", "gros.pdf", "c.docx"]
-        await a.deposer(lot: lot) { rang in
-            if noms[rang] == "illisible" { return nil }
-            return lot.depot(fichier: Data("%PDF".utf8), nomFichier: noms[rang], type: "application/pdf")
+        let pdf = Data("%PDF-1.4".utf8)
+        func ajouter(_ nom: String, octets: Int = 8, entete: Data? = nil, source: SourceFichier? = nil) {
+            a.ajouter(
+                FichierAEnvoyer(nom: nom, octets: octets, entete: entete ?? pdf),
+                source: source ?? .donnees(pdf))
         }
-        #expect(acces.noms == ["a.pdf", "b.txt", "gros.pdf", "c.docx"], "l'un après l'autre, dans l'ordre")
-        #expect(acces.corps.allSatisfy { $0.contains("name=\"pour_le\"\r\n\r\n2026-10-24") })
+        ajouter("a.pdf")
+        ajouter("illisible.pdf", source: .fichier(URL(fileURLWithPath: "/nonexistent/illisible.pdf")))
+        ajouter("b.txt", entete: Data("liste".utf8))
+        ajouter("gros.pdf")
+        ajouter("c.docx")
+        ajouter("lourd.pdf", octets: DepotDocument.tailleMax + 1)
+        ajouter("lettre.docx", entete: Data("PK".utf8))
+        ajouter("doublon.pdf")
+        ajouter("coupe.pdf")
+        #expect(a.aEnvoyer.filter(\.valable).count == 7 && a.pastilleDocuments == 9, "les refusées comptent aussi")
+        await a.envoyer(etiquettes: ["12", "Jardin"], pourLe: "2026-10-24")
+        #expect(acces.noms == ["a.pdf", "b.txt", "gros.pdf", "c.docx", "doublon.pdf", "coupe.pdf"])
+        #expect(
+            acces.corps.allSatisfy {
+                $0.contains("name=\"pour_le\"\r\n\r\n2026-10-24\r\n") && $0.contains("name=\"etiquette\"\r\n\r\n12\r\n")
+                    && $0.contains("name=\"etiquette\"\r\n\r\nJardin\r\n")
+            })
+        #expect(a.aEnvoyer.isEmpty, "valables et refusées : toutes retirées")
         #expect(
             a.refusLocaux.map(\.texte).sorted() == [
-                "Refusé : trop lourd (20 Mo au plus)", "Refusé : type non pris en charge (PDF, image, texte ou e-mail)",
+                "Refusé : ce fichier n’a pas pu être lu", "Refusé : envoi coupé (la maison ne répond pas)",
+                "Refusé : trop lourd (20 Mo au plus)",
+                "Refusé : type non pris en charge (PDF, image, texte ou e-mail)",
             ])
-        #expect(a.etatDepot == "2 reçus. Alfred les lit…")
-        #expect(avis.textes.contains("2 documents reçus."))
-        try await Self.attendre { a.pastilleDocuments == 2 }
-        a.retirer(a.refusLocaux[0])
-        #expect(a.refusLocaux.count == 1 && a.pastilleDocuments == 1)
+        try await Self.attendre { a.confirmation != nil && a.suivi.lignes.isEmpty }
+        #expect(
+            a.confirmation?.ligne
+                == "2 documents rangés dans Paperless, 1 déjà présent (étiquette « Jardin » ajoutée) — voir")
+        #expect(a.confirmation?.lien?.path == "/documents", "plusieurs : la liste de Paperless")
+        #expect(a.pastilleDocuments == 4, "les refus au dépôt ; le doublon n'y entre pas")
         a.suspendre()
     }
 
-    @Test(
-        "Un document de plus de 20 Mo n'est pas envoyé : une carte « Refusé » dans la fenêtre (23.10), jusqu'à Retirer")
+    @Test("Trop lourd (23.10, soir) : refusé dans sa ligne, compté, jamais envoyé ; retiré d'un toucher")
     func tropLourd() async throws {
-        let avis = Recueil()
-        let a = Annexes(acces: AccesDemo()) { texte, _ in avis.textes.append(texte) }
+        let acces = AccesDepotsDeTest()
+        let a = Annexes(acces: acces) { _, _ in }
         a.demarrer(connecte: true)
-        try await Self.attendre { !a.documents.isEmpty }
-        // le refus est immédiat (rien ne part) : vérifié dès le retour, sans attente
-        await a.deposer(
-            DepotDocument(
-                fichier: Data(count: DepotDocument.tailleMax + 1), nomFichier: "gros.pdf", type: "application/pdf"))
-        #expect(a.documents.count == 2 && a.etatDepot == nil)
-        #expect(a.refusLocaux.map(\.nom) == ["gros.pdf"], "dans la fenêtre Documents (point 11)")
-        #expect(a.refusLocaux.first?.texte == "Refusé : trop lourd (20 Mo au plus)")
-        #expect(avis.textes == ["Refusé : trop lourd (20 Mo au plus)"])
-        #expect(a.pastilleDocuments == 2, "le refus de la démo et celui de l'appareil")
-        a.retirer(a.refusLocaux[0])
-        #expect(a.refusLocaux.isEmpty && a.pastilleDocuments == 1)
+        let gros = FichierAEnvoyer(nom: "plan.pdf", octets: DepotDocument.tailleMax + 1, entete: Data("%PDF".utf8))
+        a.ajouter(gros, source: .donnees(Data()))
+        #expect(a.aEnvoyer.first?.texteRefus == "Refusé : trop lourd (20 Mo au plus)" && a.pastilleDocuments == 1)
+        await a.envoyer(etiquettes: [], pourLe: nil)
+        #expect(acces.noms.isEmpty && a.aEnvoyer.count == 1, "aucun fichier valable : rien ne part")
+        a.retirerAEnvoyer(gros.id)
+        #expect(a.aEnvoyer.isEmpty && a.pastilleDocuments == 0)
         a.suspendre()
     }
 
@@ -113,12 +129,6 @@ struct AnnexesTests {
         try await Self.attendre { a.etiquettes != nil }
         #expect(a.etiquettes?.disponible == true)
         #expect(a.etiquettes?.etiquettes.map(\.nom) == ["Assurance", "Électricité", "Impôts", "Maison", "Voiture"])
-        // un dépôt avec une étiquette de la liste (son n°) et une nouvelle (son nom) : la carte les porte
-        let lot = LotDepot(pourLe: nil, total: 1, etiquettes: ["2", "Jardin"])
-        await a.deposer(lot.depot(fichier: Data("%PDF-1.7".utf8), nomFichier: "facture.pdf", type: "application/pdf"))
-        try await Self.attendre { a.documents.first?.nom == "facture.pdf" }
-        #expect(a.documents.first?.etiquettes == ["Électricité", "Jardin"])
-        #expect(a.documents.first?.texteEtiquettes == " · étiquettes : Électricité, Jardin")
         a.suspendre()
         let ancien = Annexes(acces: AccesDepotsDeTest()) { _, _ in }
         ancien.demarrer(connecte: true)
@@ -128,28 +138,16 @@ struct AnnexesTests {
         ancien.suspendre()
     }
 
-    @Test(
-        "Étiquettes d'un lot (23.10) : les mêmes pour chaque fichier ; un 400 du relais devient une carte avec son texte"
-    )
-    func etiquettesLot() async throws {
+    @Test("Étiquette refusée (23.10) : un 400 du relais devient une carte « À revoir » avec son texte")
+    func etiquetteRefusee() async throws {
         let acces = AccesDepotsDeTest()
         let a = Annexes(acces: acces) { _, _ in }
         a.demarrer(connecte: true)
-        let lot = LotDepot(pourLe: nil, total: 2, etiquettes: ["12", "Jardin"])
-        let noms = ["a.pdf", "etiquette-refusee.pdf"]
-        await a.deposer(lot: lot) { rang in
-            lot.depot(fichier: Data("%PDF".utf8), nomFichier: noms[rang], type: "application/pdf")
-        }
-        #expect(acces.noms == noms)
-        #expect(
-            acces.corps.allSatisfy {
-                $0.contains("name=\"etiquette\"\r\n\r\n12\r\n") && $0.contains("name=\"etiquette\"\r\n\r\nJardin\r\n")
-            })
-        #expect(
-            a.refusLocaux.map(\.texte) == [
-                "Refusé : étiquette inconnue (n° 12) : rechoisissez-la dans la liste"
-            ])
-        #expect(a.etatDepot == "Reçu. Alfred le lit…")
+        let pdf = Data("%PDF".utf8)
+        a.ajouter(FichierAEnvoyer(nom: "etiquette-refusee.pdf", octets: 4, entete: pdf), source: .donnees(pdf))
+        await a.envoyer(etiquettes: ["12"], pourLe: nil)
+        #expect(a.refusLocaux.map(\.texte) == ["Refusé : étiquette inconnue (n° 12) : rechoisissez-la dans la liste"])
+        #expect(a.suivi.lignes.isEmpty && a.confirmation == nil)
         a.suspendre()
     }
 
@@ -280,13 +278,16 @@ struct AnnexesTests {
     }
 }
 
-/// 23.10 : un relais qui ne fait que recevoir des dépôts : 202 (avec la carte), 413 pour « gros.pdf », 415 pour un
-/// « .docx », 400 avec un texte pour « etiquette-refusee.pdf » ; il garde le nom et le corps de chaque requête, dans
-/// l'ordre. Il ne connaît pas les étiquettes (`/docs/etiquettes` : 404, comme un relais plus ancien).
+/// 23.10 (soir) : un relais qui ne fait que recevoir des dépôts : 202 et la fiche (`{"id": "d-<nom>"}`), puis le
+/// document dans les récents (« doublon.pdf » : déjà présent, une étiquette ajoutée) ; 413 pour « gros.pdf », 415 pour un
+/// « .docx », 400 avec un texte pour « etiquette-refusee.pdf », envoi coupé pour « coupe.pdf ». Il garde le nom et le
+/// corps de chaque requête, dans l'ordre. Il ne connaît pas les étiquettes (`/docs/etiquettes` : 404, comme un relais
+/// plus ancien).
 final class AccesDepotsDeTest: AccesRelais, @unchecked Sendable {
     private let verrou = NSLock()
     private var _noms: [String] = []
     private var _corps: [String] = []
+    private var _recus: [String] = []
 
     var noms: [String] { verrou.withLock { _noms } }
     var corps: [String] { verrou.withLock { _corps } }
@@ -297,13 +298,23 @@ final class AccesDepotsDeTest: AccesRelais, @unchecked Sendable {
 
     func lire(_ chemin: String) async throws -> (statut: Int, corps: Data) {
         guard chemin == "/docs" else { return (404, Data()) }
-        let n = noms.filter { $0 == "a.pdf" || $0 == "b.txt" }.count
-        let docs = (0..<n).map { i -> [String: Any] in
-            ["id": "d\(i)", "nom": "d\(i)", "etat": "pret", "statut": "range"]
+        let recents = verrou.withLock { _recus }.enumerated().map { i, nom -> [String: Any] in
+            var d: [String: Any] = [
+                "id": "d-" + nom, "nom": nom, "etat": "pret", "statut": "range",
+                "range_le": "2026-10-23T18:00:00+02:00",
+                "lien": "https://paperless.exemple.invalid/documents/\(i + 1)/details",
+            ]
+            if nom == "doublon.pdf" {
+                d["statut"] = "doublon"
+                d["avertissement"] = "déjà présent dans Paperless — étiquette « Jardin » ajoutée"
+            }
+            return d
         }
-        return (
-            200, try JSONSerialization.data(withJSONObject: ["documents": docs, "a_traiter": 0, "hors_panneau": 0])
-        )
+        let liste: [String: Any] = [
+            "documents": [], "recents": recents, "a_revoir": 0, "a_traiter": 0, "hors_panneau": 0,
+            "paperless_liste": "https://paperless.exemple.invalid/documents",
+        ]
+        return (200, try JSONSerialization.data(withJSONObject: liste))
     }
 
     func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data) {
@@ -323,7 +334,9 @@ final class AccesDepotsDeTest: AccesRelais, @unchecked Sendable {
             return (400, Data("étiquette inconnue (n° 12) : rechoisissez-la dans la liste".utf8))
         }
         if nom.hasSuffix(".docx") { return (415, Data()) }
-        return (202, Data("{}".utf8))
+        if nom == "coupe.pdf" { throw ErreurRelais("la maison ne répond pas") }
+        verrou.withLock { _recus.append(nom) }
+        return (202, try JSONSerialization.data(withJSONObject: ["id": "d-" + nom]))
     }
 }
 

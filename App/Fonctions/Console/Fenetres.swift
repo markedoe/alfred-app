@@ -87,28 +87,42 @@ struct Fenetre<Contenu: View>: View {
 
 // MARK: - documents
 
-/// La fenêtre « Documents » : déposer un ou plusieurs documents (photothèque, scanner, fichiers), le jour qu'ils
-/// concernent, et la boîte d'arrivée (23.10) : une carte par fichier, en lecture, rangée dans Paperless (24 h, puis
-/// elle quitte le panneau ; la fiche reste à la maison) ou refusée avec son motif (« Réessayer », « Retirer »).
+/// La fenêtre « Documents » (23.10, soir, retour d'essai : « ajouter les docs, choisir le tag et cliquer sur envoyer
+/// pour envoyer sur Paperless, et une fois dans Paperless ils ne doivent plus apparaître ») : « Ajouter des documents »
+/// remplit « À envoyer » (rien ne part) ; « Étiquettes » et « Pour le » valent pour le lot ; « Envoyer à Paperless »
+/// l'envoie ; « En cours » suit chaque fichier jusqu'à son rangement, puis une ligne confirme (« 3 documents rangés
+/// dans Paperless — voir », 60 s) ; « À revoir » garde les vrais échecs (« Réessayer », « Retirer »). Un document rangé,
+/// ou déjà présent dans Paperless (un avertissement), quitte la fenêtre.
 struct FenetreDocuments: View {
     @Environment(Alfred.self) private var alfred
     let fermer: () -> Void
     /// Le jour que le document concerne : aucun par défaut (le champ vide de la console).
     @State private var avecJour = false
     @State private var jour = Calendar.current.startOfDay(for: .now)
-    /// 23.10 : les étiquettes du prochain dépôt (aucune par défaut), vidées une fois le lot envoyé.
+    /// 23.10 : les étiquettes du prochain lot (aucune par défaut), vidées une fois le lot envoyé.
     @State private var etiquettes: [ChoixEtiquette] = []
 
     var body: some View {
         Fenetre(titre: "Documents", fermer: fermer) {
             VStack(alignment: .leading, spacing: 10) {
-                Depot(jour: avecJour ? jour : nil, etiquettes: $etiquettes)
-                quand
-                // un relais plus ancien ne connaît pas les étiquettes : le champ n'apparaît pas
-                if alfred.annexes?.etiquettes != nil {
-                    ChampEtiquettes(choisies: $etiquettes)
+                Depot()
+                if case .reserve(let texte)? = alfred.annexes?.accesDocuments {
+                    Text(texte).font(.caption).foregroundStyle(Color(.texteSecondaire))
+                } else {
+                    aEnvoyer
+                    // un relais plus ancien ne connaît pas les étiquettes : le champ n'apparaît pas
+                    if alfred.annexes?.etiquettes != nil {
+                        ChampEtiquettes(choisies: $etiquettes)
+                    }
+                    quand
+                    boutonEnvoyer
+                    confirmation
+                    Group {
+                        enCours
+                        aRevoir
+                    }
+                    .masqueInvites(alfred.modeInvites)
                 }
-                liste
             }
         }
         .onAppear {
@@ -168,26 +182,159 @@ struct FenetreDocuments: View {
         }
     }
 
-    @ViewBuilder private var liste: some View {
-        let annexes = alfred.annexes
-        let refus = annexes?.refusLocaux ?? []
-        if case .reserve(let texte)? = annexes?.accesDocuments {
-            Text(texte).font(.caption).foregroundStyle(Color(.texteSecondaire))
-        } else if let docs = annexes?.documents, !docs.isEmpty || !refus.isEmpty {
-            VStack(spacing: 8) {
-                // 23.10 : les refus de l'appareil (trop lourd, type) d'abord : rien n'est parti à la maison
-                ForEach(refus) { r in
-                    CarteRefusLocal(refus: r)
-                }
-                // 23.10 : 30 cartes au plus, comme la console (un lot de plus de 12 fichiers n'en masque aucun)
-                ForEach(docs.prefix(30)) { d in
-                    CarteDocument(document: d)
-                }
+    /// « À envoyer » : une ligne par fichier choisi, « <nom> · <taille> », son refus immédiat s'il y en a un, et sa
+    /// croix (« Retirer <nom> de la liste », un toucher : rien n'était parti).
+    @ViewBuilder private var aEnvoyer: some View {
+        let lignes = alfred.annexes?.aEnvoyer ?? []
+        Intertitre(texte: "À envoyer")
+        if lignes.isEmpty {
+            Text("Aucun document à envoyer.").font(.caption).foregroundStyle(Color(.texteSecondaire))
+        } else {
+            VStack(spacing: 6) {
+                ForEach(lignes) { LigneAEnvoyer(fichier: $0) }
             }
             .masqueInvites(alfred.modeInvites)
-        } else {
-            Text("Aucun document pour l’instant.").font(.caption).foregroundStyle(Color(.texteSecondaire))
         }
+    }
+
+    /// « Envoyer à Paperless (n) » : les fichiers valables, avec les étiquettes et le jour ; désactivé sans fichier
+    /// valable ou pendant un envoi. Ensuite « À envoyer » et les étiquettes sont vidées (« Pour le » reste).
+    private var boutonEnvoyer: some View {
+        let annexes = alfred.annexes
+        let n = annexes?.aEnvoyer.filter(\.valable).count ?? 0
+        return Button("Envoyer à Paperless (\(n))") {
+            let choisies = etiquettes
+            let pourLe = avecJour ? Depot.format("yyyy-MM-dd", jour) : nil
+            Task {
+                await annexes?.envoyer(etiquettes: choisies.map(\.valeur), pourLe: pourLe)
+                // vidées, sauf si on les a déjà changées pour le lot suivant pendant l'envoi
+                if etiquettes == choisies { etiquettes = [] }
+            }
+        }
+        .buttonStyle(StyleConsole(genre: .principal, hauteur: 44))
+        .largeurDuTexte()
+        .disabled(n == 0 || annexes?.envoiEnCours != false)
+        .accessibilityIdentifier("envoyerPaperless")
+    }
+
+    /// « 1 document rangé dans Paperless — voir » (60 s, ou jusqu'au prochain ajout) : « voir » ouvre sa fiche, ou la
+    /// liste de Paperless pour plusieurs.
+    @ViewBuilder private var confirmation: some View {
+        if let c = alfred.annexes?.confirmation {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(c.texte)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(.sarcelle))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let lien = c.lien {
+                    Text("—").font(.caption).foregroundStyle(Color(.texteSecondaire)).accessibilityHidden(true)
+                    Link(destination: lien) {
+                        Text("voir").font(.caption.weight(.semibold)).underline().frame(minHeight: 44)
+                    }
+                    .accessibilityLabel("Voir dans Paperless")
+                    .accessibilityHint("S’ouvre dans Safari")
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("confirmationRangement")
+        }
+    }
+
+    /// « En cours » : les fichiers du lot (« <nom> — Envoi… », puis « — Rangement… »), les autres cartes du relais en
+    /// lecture ou en rangement, et les documents de banc (comme avant : « Supprimer »).
+    @ViewBuilder private var enCours: some View {
+        let annexes = alfred.annexes
+        let suivi = annexes?.suivi ?? SuiviLot()
+        let suivis = suivi.documentsSuivis
+        let cartes = (annexes?.documents ?? []).filter {
+            [.lecture, .rangement].contains($0.statut) && !suivis.contains($0.id)
+        }
+        let banc = (annexes?.documents ?? []).filter { $0.statut == .banc }
+        let lignes = suivi.lignes + cartes.map { $0.nom + " — Rangement…" }
+        if !lignes.isEmpty || !banc.isEmpty {
+            Intertitre(texte: "En cours")
+            ForEach(Array(lignes.enumerated()), id: \.offset) { _, ligne in
+                Text(ligne)
+                    .font(.caption)
+                    .foregroundStyle(Color(.sodium))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+            ForEach(banc.prefix(30)) { CarteDocument(document: $0) }
+        }
+    }
+
+    /// « À revoir » : les vrais échecs — refusés par le relais (« Réessayer », « Retirer » en deux temps) et refus au
+    /// dépôt (400, 413, 415, envoi coupé, illisible : « Retirer »).
+    @ViewBuilder private var aRevoir: some View {
+        let annexes = alfred.annexes
+        let refus = annexes?.refusLocaux ?? []
+        let refuses = (annexes?.documents ?? []).filter { $0.statut == .refuse }
+        if !refus.isEmpty || !refuses.isEmpty {
+            Intertitre(texte: "À revoir")
+            VStack(spacing: 8) {
+                ForEach(refus) { CarteRefusLocal(refus: $0) }
+                // 30 cartes au plus, comme la console
+                ForEach(refuses.prefix(30)) { CarteDocument(document: $0) }
+            }
+        }
+    }
+}
+
+/// Un intertitre de la fenêtre Documents (« À envoyer », « En cours », « À revoir »).
+private struct Intertitre: View {
+    let texte: String
+
+    var body: some View {
+        Text(texte)
+            .font(.caption.weight(.heavy))
+            .tracking(1.2)
+            .textCase(.uppercase)
+            .foregroundStyle(Color(.champagne))
+            .padding(.top, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Une ligne de « À envoyer » : « devis.pdf · 340 ko », son refus immédiat (« Refusé : trop lourd… »), sa croix.
+private struct LigneAEnvoyer: View {
+    @Environment(Alfred.self) private var alfred
+    let fichier: FichierAEnvoyer
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fichier.ligne)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(.glace))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let refus = fichier.texteRefus {
+                    Text(refus)
+                        .font(.caption)
+                        .foregroundStyle(CarteDocument.roseRefus)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                alfred.annexes?.retirerAEnvoyer(fichier.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color(.texteSecondaire))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retirer \(fichier.nom) de la liste")
+        }
+        .padding(.leading, 10)
+        .background(Color(red: 12 / 255, green: 27 / 255, blue: 40 / 255), in: .rect(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).strokeBorder(
+                fichier.valable ? Color(.trait) : CarteDocument.rouge, lineWidth: 1.5)
+        )
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -195,7 +342,7 @@ struct FenetreDocuments: View {
 /// rangement, rangé, envoyé, refusé), son résumé ; la bordure est sodium pendant la lecture et le rangement, rouge pour
 /// un refus. Boutons : « ouvrir dans Paperless » (si la maison donne le lien), « Réessayer » et « Retirer » (en deux
 /// temps) sur un refus, « Supprimer » en deux temps sur un document que Paperless n'a pas (banc) ; plus de « Supprimer »
-/// sur un document rangé (il quitte le panneau seul après 24 h, sa fiche reste à la maison).
+/// sur un document rangé (23.10, soir : il quitte le panneau aussitôt, sa fiche reste à la maison).
 private struct CarteDocument: View {
     @Environment(Alfred.self) private var alfred
     @Environment(\.openURL) private var ouvrir
@@ -325,7 +472,7 @@ private struct CarteDocument: View {
         switch document.statut {
         case .lecture, .rangement: Color(.sodium)
         case .refuse: Self.rouge
-        case .range, .envoye, .banc, .lu: Color(.trait)
+        case .range, .envoye, .banc, .lu, .doublon: Color(.trait)
         }
     }
 
@@ -333,7 +480,7 @@ private struct CarteDocument: View {
         switch document.statut {
         case .refuse: Self.roseRefus
         case .lecture, .rangement: Color(.sodium)
-        case .range, .envoye, .banc, .lu: Color(.sarcelle)
+        case .range, .envoye, .banc, .lu, .doublon: Color(.sarcelle)
         }
     }
 
