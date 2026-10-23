@@ -344,6 +344,15 @@ final class ParcoursUITests: XCTestCase {
             app.swipeUp()
             capturerEtVerifier("grand-texte-7-reglages-fin")
         }
+        // 23.10 : le champ « Ajouter une étiquette » des Documents — l'audit d'Apple y prédit un texte coupé aux grandes
+        // tailles ; sa hauteur MESURÉE doit grandir avec le texte (sinon l'audit avait raison), capture à l'appui
+        bouton(app, "fermerFenetre").tap()
+        vue(app, "pieces")
+        bouton(app, "documents").tap()
+        let etiquette = app.textFields["etiquette"]
+        XCTAssertTrue(etiquette.waitForExistence(timeout: 5))
+        h["etiquette"] = etiquette.frame.height
+        if captures { capturerEtVerifier("grand-texte-8-documents") }
         return h
     }
 
@@ -415,12 +424,16 @@ final class ParcoursUITests: XCTestCase {
 
     private static let engagementMicro =
         "Le micro ne s’ouvre que pendant une conversation, et jamais en arrière-plan."
+    /// 23.10 : le champ des étiquettes des Documents (« texte coupé » prédit ; sa hauteur en très grand texte est
+    /// mesurée par `testGrandTexte`, capture « grand-texte-8-documents »).
+    private static let champEtiquette = "Ajouter une étiquette"
 
     /// Les vues de la console et les réglages, chacune auditée en entier (sauf la taille du texte : voir
     /// `testGrandTexte`) : tous les problèmes sont listés dans UN échec, avec la vue, le type de problème, l'élément
     /// et sa place. Deux cas sont écartés, et listés à part (pièce jointe « audit-ecartes ») :
     /// - « texte coupé » prédit pour l'engagement du micro, démenti par la capture « grand-texte-7-reglages-fin » (le
-    ///   texte passe à la ligne jusqu'au bout, rien n'est coupé) ;
+    ///   texte passe à la ligne jusqu'au bout, rien n'est coupé), et pour le champ des étiquettes des Documents,
+    ///   démenti par sa hauteur mesurée en très grand texte (`testGrandTexte`, capture « grand-texte-8-documents ») ;
     /// - le contraste d'un texte hors de la vue (sous le bord d'un panneau qui défile, sous la carte d'une pièce).
     ///
     /// Le nom et la température des pièces, l'heure et l'état du noyau sont dessinés dans la roue, comme dans la
@@ -463,7 +476,10 @@ final class ParcoursUITests: XCTestCase {
                     + (probleme.element.map { "« \($0.label) » \(Int($0.frame.minY))…\(Int($0.frame.maxY)) pt" }
                         ?? "sans élément (\(probleme.debugDescription))")
                     + " · \(probleme.detailedDescription)"
-                if probleme.auditType == .textClipped, probleme.element?.label == Self.engagementMicro {
+                if probleme.auditType == .textClipped,
+                    probleme.element?.label == Self.engagementMicro || probleme.element?.label == Self.champEtiquette
+                {
+                    // démentis par testGrandTexte : capture et hauteur mesurée en très grand texte
                     ecartes.append("vérifié en très grand texte · " + description)
                 } else if sansElementEcarte, probleme.auditType == .textClipped, probleme.element == nil {
                     ecartes.append("sans élément, disposition large · " + description)
