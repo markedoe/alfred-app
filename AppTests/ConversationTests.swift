@@ -522,6 +522,33 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    @Test("Micro coupé (24.10) : rien ne part, la conversation reste ouverte ; rouvert, une phrase ouvre un tour")
+    func microCoupe() async throws {
+        let (c, client, voix) = try await Self.pret()
+        c.basculerMicro()
+        #expect(!c.microCoupe, "hors conversation : rien à couper")
+        await c.basculerEcoute()
+        c.basculerMicro()
+        #expect(c.enConversation && c.microCoupe && c.niveauMicro == 0)
+        // une vraie phrase, micro coupé : aucun tour (la démo répondrait « Je n'ai rien saisi. »)
+        voix.entendre([Float](repeating: 0.001, count: 1600))
+        for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(c.avis == nil && c.enConversation && c.phase == .ecoute && c.niveauMicro == 0)
+        // rouvert : Alfred réécoute aussitôt, une phrase ouvre un tour
+        c.basculerMicro()
+        #expect(!c.microCoupe && c.phase == .ecoute)
+        voix.entendre([Float](repeating: 0.001, count: 1600))
+        for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        try await Self.attendre(c) { $0.avis?.texte == "Je n’ai rien saisi." }
+        // coupé puis conversation fermée : le prochain toucher rouvre un micro qui écoute
+        c.basculerMicro()
+        await c.terminer()
+        #expect(!c.enConversation && !c.microCoupe)
+        try await Self.attendre(c) { $0.phase == .repos }
+        await client.arreter()
+    }
+
     @Test("Couper (appel, app cachée) : l'essai du micro s'arrête et Alfred se tait")
     func couper() async throws {
         let voix = VoixMuette()

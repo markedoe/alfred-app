@@ -150,12 +150,15 @@ struct StyleConsole: ButtonStyle {
     enum Genre { case normal, principal, session, sodium, alerte, piece }
     var genre: Genre
     var hauteur: CGFloat
+    /// Un bouton à icône de cette largeur (la console : `#music-toggle`, `#mic-mute`) ; sans elle, toute la place.
+    var largeur: CGFloat?
     @Environment(\.isEnabled) private var actif
     @Environment(\.dynamicTypeSize) private var taille
 
-    init(genre: Genre = .normal, hauteur: CGFloat = 46) {
+    init(genre: Genre = .normal, hauteur: CGFloat = 46, largeur: CGFloat? = nil) {
         self.genre = genre
         self.hauteur = hauteur
+        self.largeur = largeur
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -167,8 +170,9 @@ struct StyleConsole: ButtonStyle {
             .minimumScaleFactor(taille.isAccessibilitySize ? 1 : 0.85)
             .padding(.vertical, 6)
             .foregroundStyle(actif ? texte : Console.texteInactif)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: max(44, hauteur))
+            .padding(.horizontal, largeur == nil ? 16 : 0)
+            .frame(width: largeur.map { max(44, $0) })
+            .frame(maxWidth: largeur == nil ? .infinity : nil, minHeight: max(44, hauteur))
             .background(fond(configuration.isPressed), in: .rect(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8).strokeBorder(

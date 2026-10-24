@@ -375,6 +375,21 @@ struct BasConsole: View {
                     !conversation.enConversation && conversation.phase == .repos ? .startsMediaSession : []
                 )
                 .accessibilityIdentifier("parler")
+                if conversation.enConversation {
+                    // 24.10 (la console : #mic-mute) : couper le micro sans fermer la conversation
+                    Button {
+                        conversation.basculerMicro()
+                    } label: {
+                        Image(systemName: conversation.microCoupe ? "mic.slash" : "mic")
+                            .accessibilityHidden(true)
+                    }
+                    .buttonStyle(StyleConsole(genre: conversation.microCoupe ? .sodium : .normal, largeur: 48))
+                    .keyboardShortcut(raccourcis && !ecrire ? KeyboardShortcut("m", modifiers: []) : nil)
+                    .accessibilityLabel(conversation.microCoupe ? "Rouvrir le micro" : "Couper le micro")
+                    .accessibilityAddTraits(conversation.microCoupe ? .isSelected : [])
+                    .help(conversation.microCoupe ? "Rouvrir le micro (m)" : "Couper le micro (m)")
+                    .accessibilityIdentifier("micro")
+                }
                 // jamais grisé, comme la console : dans une conversation, l'écrit en garde le fil (un nom mal compris)
                 Button("Écrire") { ecrire.toggle() }
                     .buttonStyle(StyleConsole())
@@ -419,6 +434,9 @@ struct BasConsole: View {
         case .pret: break
         }
         let mots: String
+        if conversation.enConversation, conversation.microCoupe, [.ecoute, .repos].contains(conversation.phase) {
+            return "Conversation ouverte · micro coupé"
+        }
         switch conversation.phase {
         case .repos: mots = conversation.enConversation ? "un instant…" : "À votre service"
         case .ecoute: mots = conversation.enConversation ? "je vous écoute, parlez" : "Je vous écoute, parlez"
@@ -430,6 +448,7 @@ struct BasConsole: View {
 
     private var couleurStatut: Color {
         if case .fatal = alfred.liaison { return Color(.alerte) }
+        if conversation.enConversation, conversation.microCoupe { return Color(.sodium) }
         return conversation.phase == .ecoute ? Color(.sarcelle) : Color(.texteSecondaire)
     }
 }

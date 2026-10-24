@@ -17,6 +17,8 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
   - Un toucher sur le noyau ouvre une conversation continue : chaque phrase est un tour, et Alfred réécoute après
     avoir répondu.
   - La conversation se ferme d’un toucher, après 90 s de silence, ou quand l’app passe en arrière-plan.
+  - Pendant la conversation, le bouton du micro (ou « m » au clavier) le coupe : Alfred n’entend plus rien, sa
+    réponse en cours finit, et la conversation reste ouverte (10 min au plus) ; un second appui et il réécoute aussitôt.
   - On l’entend répondre pendant que sa voix est synthétisée. Sous chaque réponse, comme la console : sa durée,
     « llm » ou « intent local », le nombre d’outils, et les « Détails techniques » repliés (chaque outil, ses
     arguments, fait ou échoué ; jamais le contenu d’un résultat).
