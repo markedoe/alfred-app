@@ -107,6 +107,8 @@ BASE = {
     ("GET", "/v1/builds/b1/betaBuildLocalizations"): {"data": []},
     ("POST", "/v1/betaBuildLocalizations"): {"data": {}},
     ("POST", "/v1/betaGroups/g1/relationships/builds"): None,
+    ("GET", "/v1/builds/b1/buildBetaDetail"): {"data": {"id": "d1", "attributes": {"autoNotifyEnabled": True}}},
+    ("PATCH", "/v1/buildBetaDetails/d1"): {"data": {}},
     ("POST", "/v1/betaAppReviewSubmissions"): {"data": {"attributes": {"betaReviewState": "WAITING_FOR_REVIEW"}}},
 }
 
@@ -128,6 +130,27 @@ class Soumettre(unittest.TestCase):
         a_tester = next(corps for m, c, corps in faux.appels if (m, c) == ("POST", "/v1/betaBuildLocalizations"))
         self.assertEqual(a_tester["data"]["attributes"]["locale"], "fr-FR")
         self.assertEqual(a_tester["data"]["attributes"]["whatsNew"], tf.A_TESTER)
+
+    def test_pas_d_e_mail_aux_testeurs(self):
+        # 24.10 : autoNotifyEnabled mis à faux AVANT l'ajout au groupe externe (plus un e-mail par mise à jour)
+        faux, sortie = self.lancer(
+            {("GET", "/v1/builds?"): build(), ("GET", "/v1/builds/b1/betaAppReviewSubmission"): {"data": None}}
+        )
+        appels = [(m, c) for m, c, _ in faux.appels]
+        patch = next(corps for m, c, corps in faux.appels if (m, c) == ("PATCH", "/v1/buildBetaDetails/d1"))
+        self.assertIs(patch["data"]["attributes"]["autoNotifyEnabled"], False)
+        self.assertLess(appels.index(("PATCH", "/v1/buildBetaDetails/d1")),
+                        appels.index(("POST", "/v1/betaGroups/g1/relationships/builds")))
+        self.assertIn("pas d'e-mail", sortie)
+
+    def test_avertir_sur_demande(self):
+        with mock.patch.dict(os.environ, {"ALFRED_AVERTIR_TESTEURS": "1"}):
+            faux, sortie = self.lancer(
+                {("GET", "/v1/builds?"): build(), ("GET", "/v1/builds/b1/betaAppReviewSubmission"): {"data": None}}
+            )
+        # déjà à vrai chez Apple : rien à changer
+        self.assertNotIn(("PATCH", "/v1/buildBetaDetails/d1"), [(m, c) for m, c, _ in faux.appels])
+        self.assertIn("avertis par e-mail", sortie)
 
     def test_examen_deja_demande(self):
         faux, sortie = self.lancer(

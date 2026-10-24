@@ -17,6 +17,8 @@ Variables :
                        l'adresse des retours des testeurs (preparer)
     ASC_TESTEURS       JSON [{"email", "prenom", "nom"}] (inviter)
     ALFRED_A_TESTER    le texte « À tester » de la fabrication (soumettre ; un texte par défaut sinon)
+    ALFRED_AVERTIR_TESTEURS  « 1 » : les testeurs externes reçoivent l'e-mail d'Apple pour cette fabrication (soumettre ;
+                       par défaut non, depuis le 24.10 : pas un e-mail à chaque mise à jour)
 """
 
 import json
@@ -361,6 +363,20 @@ def soumettre(numero, minutes=45):
             },
         )
     print("« À tester » : à jour")
+
+    # 24.10 : plus d'e-mail aux testeurs externes à chaque fabrication. Réglage d'Apple « autoNotifyEnabled »
+    # (buildBetaDetails : « send test invitations to users automatically when the build is available to external
+    # groups ») mis à faux AVANT l'ajout au groupe ; la fabrication arrive quand même dans leur app TestFlight.
+    # ALFRED_AVERTIR_TESTEURS=1 : les avertir pour cette fabrication-ci (une version à annoncer).
+    avertir = os.environ.get("ALFRED_AVERTIR_TESTEURS", "") == "1"
+    detail = api("GET", f"/v1/builds/{b['id']}/buildBetaDetail")["data"]
+    if detail["attributes"].get("autoNotifyEnabled") is not avertir:
+        api(
+            "PATCH",
+            f"/v1/buildBetaDetails/{detail['id']}",
+            {"data": {"type": "buildBetaDetails", "id": detail["id"], "attributes": {"autoNotifyEnabled": avertir}}},
+        )
+    print("testeurs externes : " + ("avertis par e-mail" if avertir else "pas d'e-mail pour cette fabrication"))
 
     try:
         api(
