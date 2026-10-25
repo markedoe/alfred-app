@@ -69,6 +69,13 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
         for l in liaisons { tous += await l.tours }
         return tous
     }
+
+    /// Les tours dont l'app s'est désabonnée (micro coupé pendant une phrase : la maison annule le tour).
+    func desabonnements() async -> [Int] {
+        var tous: [Int] = []
+        for l in liaisons { tous += await l.desabonnements }
+        return tous
+    }
 }
 
 /// Un tour demandé à la maison : à la voix ou écrit, et le fil envoyé (nil : un fil neuf).
@@ -84,6 +91,7 @@ actor LiaisonDeTest: Liaison {
     private var attente: CheckedContinuation<Trame, Error>?
     private var fermee = false
     private(set) var tours: [TourDeTest] = []
+    private(set) var desabonnements: [Int] = []
 
     init(etats: ValeurJSON, refuser: Bool) {
         self.etats = etats
@@ -97,6 +105,9 @@ actor LiaisonDeTest: Liaison {
         case "get_states":
             pousser(["id": id, "type": "result", "success": true, "result": etats])
         case "subscribe_events":
+            pousser(["id": id, "type": "result", "success": true, "result": .nul])
+        case "unsubscribe_events":
+            if case .nombre(let n) = m["subscription"] { desabonnements.append(Int(n)) }
             pousser(["id": id, "type": "result", "success": true, "result": .nul])
         case "assist_pipeline/pipeline/list":
             pousser([

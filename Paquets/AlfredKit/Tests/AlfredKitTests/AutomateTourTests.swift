@@ -59,6 +59,31 @@ struct AutomateTourTests {
         #expect(m["pipeline"] == nil)
     }
 
+    @Test("Micro coupé (25.10) : la phrase en cours est abandonnée (désabonnement), puis plus rien")
+    func abandonPendantLaCapture() throws {
+        var t = AutomateTour()
+        _ = t.commencer(id: 7, mode: .voix)
+        _ = t.recevoir(Self.evenement(7, "run-start", ["runner_data": ["stt_binary_handler_id": 3]]))
+        _ = t.audio(Data([1, 2]))
+        let effets = t.abandonner(id: 8)
+        guard case .envoyer(let texte) = effets.first else {
+            Issue.record("pas de désabonnement")
+            return
+        }
+        #expect(texte == #"{"id":8,"subscription":7,"type":"unsubscribe_events"}"#)
+        #expect(effets.contains(.annulerDelai))
+        #expect(Self.signaux(effets) == [.abandonne])
+        #expect(!t.occupe && !t.capture)
+        // plus rien de ce tour : ni audio, ni fin de parole, ni événement tardif
+        #expect(t.audio(Data([3])).isEmpty && t.finParole().isEmpty)
+        #expect(t.recevoir(Self.evenement(7, "stt-end", ["stt_output": ["text": "trop tard"]])).isEmpty)
+        // une fois la parole transcrite, la réponse suit son cours : pas d'abandon
+        var u = AutomateTour()
+        _ = u.commencer(id: 9, mode: .voix)
+        _ = u.recevoir(Self.evenement(9, "stt-end", ["stt_output": ["text": "allume la cuisine"]]))
+        #expect(u.abandonner(id: 10).isEmpty && u.occupe)
+    }
+
     @Test("Une 2e demande pendant un tour est refusée")
     func doublonRefuse() {
         var t = AutomateTour()

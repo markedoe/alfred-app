@@ -7,12 +7,13 @@ import Observation
 /// Mêmes règles que la console :
 /// - **conversation continue** : un toucher ouvre le micro ; chaque phrase est un tour ; après la réponse, Alfred
 ///   réécoute ; la conversation se ferme d'un toucher, ou après 90 s sans parole ;
-/// - **micro coupé** (24.10, la console : `basculerMicro`) : pendant une conversation, Alfred n'entend plus rien (rien
-///   n'est envoyé) ; sa réponse en cours finit ; la conversation reste ouverte (même fil), 10 min au plus ; rouvert, il
-///   réécoute aussitôt (le micro d’iOS reste ouvert : aucune attente). 25.10 (retour d’essai : « Alfred entend encore » et « ne
-///   réécoute pas ») : une phrase déjà commencée ne reçoit plus que du SILENCE — elle se clôt d'elle-même en moins d'une
-///   seconde (avant : la pièce qui parlait la tenait ouverte, Alfred entendait tout, puis le tour échouait au bout de
-///   90 s et fermait la conversation) ; la réponse à ce bout de phrase s'affiche sans être dite ;
+/// - **micro coupé** (24.10 ; 25.10, retour d’essai : « vraiment couper le micro, instantanément, comme le bouton micro
+///   de Claude ») : au toucher, plus RIEN ne part ; une phrase en cours est ABANDONNÉE (la maison annule le tour : rien
+///   n’est compris ni fait) ; le micro d’iOS s’éteint aussitôt — ou dès la fin de la voix d’Alfred s’il parle (sa voix
+///   passe par le même moteur) ; sa réponse à une question déjà posée arrive quand même ; la conversation reste ouverte
+///   (même fil), 10 min au plus ; rouvert, le micro se rallume et Alfred réécoute. Avant : la phrase commencée continuait,
+///   la pièce qui parlait la tenait ouverte (Alfred entendait tout), puis le tour échouait au bout de 90 s et fermait la
+///   conversation (« il ne réécoute pas ») ;
 /// - **demi-duplex** : pendant la réflexion et la voix d'Alfred, le micro n'envoie rien ; 1 s de marge après sa voix
 ///   (la fin de sa phrase ne doit pas ouvrir un tour) ;
 /// - **rien de compris** : on réécoute, sans drame ;
@@ -88,8 +89,8 @@ final class Conversation {
     private(set) var enConversation = false
     /// 24.10 (« un bouton qui coupe le micro ») : dans la conversation, Alfred n’entend plus rien.
     private(set) var microCoupe = false
-    /// La phrase en cours au moment où le micro a été coupé : sa réponse s'affiche, sans être dite.
-    @ObservationIgnored private var tourCoupe = false
+    /// Le micro d'iOS allumé (il s'éteint quand le micro est coupé, puis se rallume).
+    @ObservationIgnored private var micAllume = false
     /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,
     /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout) ; aussi pendant l'attente des
     /// réponses d'Hermes (5 min au plus chacune) et jusqu'à leur lecture. Au repos, iOS reprend la main.
@@ -225,25 +226,48 @@ final class Conversation {
             aviser("Alfred n’a pas accès au micro. Autorisez-le dans Réglages › Alfred.", .attention)
             return
         }
-        let flux: AsyncStream<[Float]>
-        do {
-            flux = try voix.ouvrirMicro()
-        } catch {
-            aviser("Le micro n’a pas pu s’ouvrir.", .attention)
-            return
-        }
+        guard allumerMicro() else { return }
         signalerEntreeOubliee()
         enConversation = true
         microCoupe = false
         conversationId = nil
         detecteur = DetecteurParole(conversation: true)
         ecouterTour(marge: 0)
+    }
+
+    /// Allume le micro d'iOS et la tâche qui l'écoute ; false (et c'est dit) s'il ne s'ouvre pas.
+    private func allumerMicro() -> Bool {
+        let flux: AsyncStream<[Float]>
+        do {
+            flux = try voix.ouvrirMicro()
+        } catch {
+            aviser("Le micro n’a pas pu s’ouvrir.", .attention)
+            return false
+        }
+        micAllume = true
         ecoute = Task { [weak self] in
             for await echantillons in flux {
                 guard let self else { return }
                 await self.entendre(echantillons)
             }
         }
+        return true
+    }
+
+    /// Éteint le micro d'iOS (micro coupé) : jamais pendant la voix d'Alfred, qui passe par le même moteur.
+    private func eteindreMicro() {
+        guard micAllume else { return }
+        ecoute?.cancel()
+        ecoute = nil
+        voix.fermerMicro()
+        micAllume = false
+        niveauMicro = 0
+    }
+
+    /// Réécoute après un tour ; micro coupé, le micro d'iOS s'éteint (la voix d'Alfred est finie).
+    private func reecouter(marge: Int) {
+        ecouterTour(marge: marge)
+        if microCoupe { eteindreMicro() }
     }
 
     private func ecouterTour(marge: Int) {
@@ -252,7 +276,6 @@ final class Conversation {
         detecteur = DetecteurParole(conversation: true, plancher: plancher)
         amorce = Amorce()
         tourOuvert = false
-        tourCoupe = false
         tourVocal = true
         margeRestante = marge
         armerSilence()
@@ -262,12 +285,22 @@ final class Conversation {
     func basculerMicro() {
         guard enConversation else { return }
         microCoupe.toggle()
-        if microCoupe, tourOuvert { tourCoupe = true }
-        if !microCoupe, phase == .ecoute, !tourOuvert {
-            ecouterTour(marge: 0)  // rien de ce qui précède ne compte : détecteur et amorce neufs
-            return
+        if microCoupe {
+            niveauMicro = 0
+            if tourOuvert {  // la phrase en cours est abandonnée : la maison annule le tour, rien n'est compris ni fait
+                tourOuvert = false
+                let client = client
+                Task { await client?.abandonnerParole() }
+            }
+            if phase == .ecoute { eteindreMicro() }  // sinon dès la fin de la voix d'Alfred (reecouter)
+        } else {
+            if !micAllume, !allumerMicro() {
+                microCoupe = true
+                return
+            }
+            // rien de ce qui précède ne compte : détecteur et amorce neufs
+            if phase == .ecoute { ecouterTour(marge: 0) }
         }
-        if microCoupe, !tourOuvert { niveauMicro = 0 }
         armerSilence()
     }
 
@@ -285,13 +318,11 @@ final class Conversation {
 
     /// Un paquet du micro (dans l'ordre, une seule tâche).
     func entendre(_ echantillons: [Float]) async {
-        // micro coupé : rien n'est écouté, sauf la fin d'une phrase déjà commencée (elle part)
-        guard enConversation, phase == .ecoute, !envoiEnCours, !microCoupe || tourOuvert, let client else {
+        // micro coupé : plus rien, instantanément (une phrase en cours a été abandonnée)
+        guard enConversation, phase == .ecoute, !envoiEnCours, !microCoupe, let client else {
             niveauMicro = 0
             return
         }
-        // une phrase commencée, micro coupé : plus que du silence (envoyé ET vu par le détecteur, qui la clôt)
-        let echantillons = microCoupe ? [Float](repeating: 0, count: echantillons.count) : echantillons
         niveauMicro = Self.niveau(echantillons)
         if margeRestante > 0 {
             detecteur.mesurer(echantillons)
@@ -360,6 +391,7 @@ final class Conversation {
         niveauMicro = 0
         lecture?.cancel()
         voix.fermerMicro()
+        micAllume = false
         if phase == .ecoute || phase == .reponse { phase = .repos }
     }
 
@@ -580,7 +612,7 @@ final class Conversation {
                 annoncer(messages.first { $0.id == messageAlfred }?.texte ?? fin.texte)
             }
         case .voix(let chemin):
-            guard tourVocal || lireReponsesEcrites, !tourCoupe else { return }
+            guard tourVocal || lireReponsesEcrites else { return }
             voixEnCours = true
             phase = .reponse
             let id = UUID()
@@ -591,11 +623,14 @@ final class Conversation {
                 guard self.lectureEnCours == id else { return }
                 self.voixFinie()
             }
+        case .abandonne:  // micro coupé pendant une phrase : rien n'a été compris ni fait
+            retirerReponseVide()
+            if enConversation, phase != .ecoute { reecouter(marge: 0) }
         case .rienSaisi:
             retirerReponseVide()
             if enConversation {
                 aviser("Je n’ai rien saisi.", .info)
-                ecouterTour(marge: 0)
+                reecouter(marge: 0)
             } else {
                 phase = .repos
             }
@@ -694,7 +729,7 @@ final class Conversation {
         messageAlfred = nil
         finRecue = false
         if enConversation {
-            ecouterTour(marge: Self.margeApresReponse)
+            reecouter(marge: Self.margeApresReponse)
         } else {
             phase = .repos
         }

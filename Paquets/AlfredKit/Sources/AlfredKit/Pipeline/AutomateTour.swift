@@ -38,6 +38,8 @@ public struct AutomateTour: Sendable {
         case rienSaisi(message: String)
         case echec(String)
         case termine(conversationId: String?, continuer: Bool)
+        /// La phrase en cours a été abandonnée (micro coupé) : la maison a annulé le tour, rien n'a été compris ni fait.
+        case abandonne
     }
 
     public static let delaiPipeline: Duration = .seconds(90)
@@ -110,6 +112,18 @@ public struct AutomateTour: Sendable {
             return []
         }
         return vider(canal) + [.envoyerAudio(Data([canal]))]
+    }
+
+    /// Abandonne la phrase en cours (le micro coupé, 25.10 : « vraiment couper, instantanément ») : HA annule le tour
+    /// quand on se désabonne de `assist_pipeline/run` (`websocket_api.py` : « Cancel pipeline if user unsubscribes »,
+    /// `connection.subscriptions[msg["id"]] = run_task.cancel`) — rien n'est transcrit, compris ni exécuté.
+    /// Seulement pendant la capture : une fois la parole transcrite, la réponse suit son cours. `id` : celui du message.
+    public mutating func abandonner(id: Int) -> [Effet] {
+        guard let actif, capture else { return [] }
+        let m: [String: ValeurJSON] = [
+            "id": .nombre(Double(id)), "type": "unsubscribe_events", "subscription": .nombre(Double(actif)),
+        ]
+        return [.envoyer(ValeurJSON.objet(m).enTexte())] + terminer(.abandonne)
     }
 
     public mutating func recevoir(_ message: MessageEntrant) -> [Effet] {

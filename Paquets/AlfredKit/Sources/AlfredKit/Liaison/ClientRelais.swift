@@ -370,6 +370,12 @@ public actor ClientRelais {
 
     public func finParole() { executer(tour.finParole()) }
 
+    /// Abandonne la phrase en cours (micro coupé) : la maison annule le tour, rien n'est compris ni exécuté.
+    public func abandonnerParole() {
+        guard tour.capture else { return }
+        executer(tour.abandonner(id: nouvelId()))
+    }
+
     // MARK: - maison
 
     /// Allume ou éteint une lumière.

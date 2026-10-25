@@ -522,18 +522,33 @@ struct ConversationTests {
         await client.arreter()
     }
 
-    @Test("Micro coupé PENDANT une phrase (25.10) : plus que du silence, la phrase se clôt même si la pièce parle fort")
+    @Test("Micro coupé PENDANT une phrase (25.10) : abandonnée sur-le-champ, plus rien ne part")
     func microCoupePendantUnePhrase() async throws {
         let relais = RelaisDeTest()
         let (c, client, voix) = try await Self.monter(relais)
         try await Self.parlerSansFinir(c, voix, relais)
-        try await Self.attendre(c) { $0.niveauMicro > 0 }
         c.basculerMicro()
-        #expect(c.microCoupe && c.enConversation)
-        // la pièce continue de parler fort : avant le 25.10, la phrase restait ouverte (Alfred entendait tout)
-        for _ in 0..<150 { voix.entendre([Float](repeating: 0.3, count: 320)) }
-        try await Self.attendre(c) { $0.phase == .reflexion }
-        #expect(c.niveauMicro == 0 && c.enConversation && c.microCoupe)
+        #expect(c.microCoupe && c.enConversation && c.phase == .ecoute && c.niveauMicro == 0)
+        // la maison annule le tour en vol (désabonnement) : rien n'est compris ni fait
+        for _ in 0..<300 {
+            if await !relais.desabonnements().isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await relais.desabonnements().count == 1)
+        // la pièce continue de parler fort : plus rien ne part (le micro est éteint), aucun nouveau tour
+        for _ in 0..<50 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await relais.tours().count == 1 && c.phase == .ecoute && c.niveauMicro == 0)
+        // rouvert : le micro se rallume, une phrase ouvre un NOUVEAU tour
+        c.basculerMicro()
+        #expect(!c.microCoupe)
+        voix.entendre([Float](repeating: 0.001, count: 1600))
+        for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        for _ in 0..<300 {
+            if await relais.tours().count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await relais.tours().count == 2)
         await c.terminer()
         await client.arreter()
     }
