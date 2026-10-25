@@ -522,6 +522,22 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    @Test("Micro coupé PENDANT une phrase (25.10) : plus que du silence, la phrase se clôt même si la pièce parle fort")
+    func microCoupePendantUnePhrase() async throws {
+        let relais = RelaisDeTest()
+        let (c, client, voix) = try await Self.monter(relais)
+        try await Self.parlerSansFinir(c, voix, relais)
+        try await Self.attendre(c) { $0.niveauMicro > 0 }
+        c.basculerMicro()
+        #expect(c.microCoupe && c.enConversation)
+        // la pièce continue de parler fort : avant le 25.10, la phrase restait ouverte (Alfred entendait tout)
+        for _ in 0..<150 { voix.entendre([Float](repeating: 0.3, count: 320)) }
+        try await Self.attendre(c) { $0.phase == .reflexion }
+        #expect(c.niveauMicro == 0 && c.enConversation && c.microCoupe)
+        await c.terminer()
+        await client.arreter()
+    }
+
     @Test("Micro coupé (24.10) : rien ne part, la conversation reste ouverte ; rouvert, une phrase ouvre un tour")
     func microCoupe() async throws {
         let (c, client, voix) = try await Self.pret()

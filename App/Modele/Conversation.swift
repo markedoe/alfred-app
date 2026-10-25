@@ -8,8 +8,11 @@ import Observation
 /// - **conversation continue** : un toucher ouvre le micro ; chaque phrase est un tour ; après la réponse, Alfred
 ///   réécoute ; la conversation se ferme d'un toucher, ou après 90 s sans parole ;
 /// - **micro coupé** (24.10, la console : `basculerMicro`) : pendant une conversation, Alfred n'entend plus rien (rien
-///   n'est envoyé) ; sa réponse en cours finit, une phrase déjà commencée part ; la conversation reste ouverte (même fil),
-///   10 min au plus ; rouvert, il réécoute aussitôt (le micro d'iOS reste ouvert : aucune attente) ;
+///   n'est envoyé) ; sa réponse en cours finit ; la conversation reste ouverte (même fil), 10 min au plus ; rouvert, il
+///   réécoute aussitôt (le micro d’iOS reste ouvert : aucune attente). 25.10 (retour d’essai : « Alfred entend encore » et « ne
+///   réécoute pas ») : une phrase déjà commencée ne reçoit plus que du SILENCE — elle se clôt d'elle-même en moins d'une
+///   seconde (avant : la pièce qui parlait la tenait ouverte, Alfred entendait tout, puis le tour échouait au bout de
+///   90 s et fermait la conversation) ; la réponse à ce bout de phrase s'affiche sans être dite ;
 /// - **demi-duplex** : pendant la réflexion et la voix d'Alfred, le micro n'envoie rien ; 1 s de marge après sa voix
 ///   (la fin de sa phrase ne doit pas ouvrir un tour) ;
 /// - **rien de compris** : on réécoute, sans drame ;
@@ -85,6 +88,8 @@ final class Conversation {
     private(set) var enConversation = false
     /// 24.10 (« un bouton qui coupe le micro ») : dans la conversation, Alfred n’entend plus rien.
     private(set) var microCoupe = false
+    /// La phrase en cours au moment où le micro a été coupé : sa réponse s'affiche, sans être dite.
+    @ObservationIgnored private var tourCoupe = false
     /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,
     /// retour d'essai : le verrouillage automatique d'iOS cachait l'app et coupait tout) ; aussi pendant l'attente des
     /// réponses d'Hermes (5 min au plus chacune) et jusqu'à leur lecture. Au repos, iOS reprend la main.
@@ -247,6 +252,7 @@ final class Conversation {
         detecteur = DetecteurParole(conversation: true, plancher: plancher)
         amorce = Amorce()
         tourOuvert = false
+        tourCoupe = false
         tourVocal = true
         margeRestante = marge
         armerSilence()
@@ -256,6 +262,7 @@ final class Conversation {
     func basculerMicro() {
         guard enConversation else { return }
         microCoupe.toggle()
+        if microCoupe, tourOuvert { tourCoupe = true }
         if !microCoupe, phase == .ecoute, !tourOuvert {
             ecouterTour(marge: 0)  // rien de ce qui précède ne compte : détecteur et amorce neufs
             return
@@ -283,6 +290,8 @@ final class Conversation {
             niveauMicro = 0
             return
         }
+        // une phrase commencée, micro coupé : plus que du silence (envoyé ET vu par le détecteur, qui la clôt)
+        let echantillons = microCoupe ? [Float](repeating: 0, count: echantillons.count) : echantillons
         niveauMicro = Self.niveau(echantillons)
         if margeRestante > 0 {
             detecteur.mesurer(echantillons)
@@ -571,7 +580,7 @@ final class Conversation {
                 annoncer(messages.first { $0.id == messageAlfred }?.texte ?? fin.texte)
             }
         case .voix(let chemin):
-            guard tourVocal || lireReponsesEcrites else { return }
+            guard tourVocal || lireReponsesEcrites, !tourCoupe else { return }
             voixEnCours = true
             phase = .reponse
             let id = UUID()
