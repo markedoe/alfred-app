@@ -1,101 +1,17 @@
 import AlfredKit
 import SwiftUI
 
-/// Une fenêtre de la console (`<dialog>` : Réglages & état, Documents, Notifications) : au centre, sur le voile sombre,
-/// 560 pt de large au plus (470 pour les réglages), son titre champagne et sa croix. Comme la console, elle ne se ferme
-/// que par la croix (ou Échap, ou le geste « retour » de VoiceOver) ; son contenu défile s'il est trop haut. Elle est
-/// présentée en plein écran sur fond transparent (`ConsoleVue`) : une vraie fenêtre d'iOS, la console reste devinée
-/// dessous mais sort de l'accessibilité (VoiceOver ne lit que la fenêtre).
-struct Fenetre<Contenu: View>: View {
-    let titre: String
-    var largeurMax: CGFloat = 560
-    let fermer: () -> Void
-    @ViewBuilder let contenu: Contenu
-    @AccessibilityFocusState private var focusTitre: Bool
-
-    var body: some View {
-        ZStack {
-            // le voile de la console (#02080dcc) : la console reste devinée dessous ; il ne ferme rien
-            Color(red: 2 / 255, green: 8 / 255, blue: 13 / 255).opacity(0.8)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
-                .onTapGesture {}
-            GeometryReader { geo in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(titre)
-                                .font(.callout.weight(.heavy))
-                                .tracking(1.9)
-                                .textCase(.uppercase)
-                                .foregroundStyle(Color(.champagne))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityAddTraits(.isHeader)
-                                .accessibilityFocused($focusTitre)
-                                // un mot plus long que la place (aux grandes tailles) rétrécit au lieu d'être coupé
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.5)
-                                .padding(.top, 11)
-                                // le titre d'abord : c'est le trait qui cède la place
-                                .layoutPriority(1)
-                            LinearGradient(colors: [Color(.trait), .clear], startPoint: .leading, endPoint: .trailing)
-                                .frame(minWidth: 0, maxWidth: .infinity)
-                                .frame(height: 2)
-                                .padding(.top, 21)
-                                .accessibilityHidden(true)
-                            Button(action: fermer) {
-                                Image(systemName: "xmark")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(Color(.glace))
-                                    .frame(width: 44, height: 44)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8).strokeBorder(Color(.acier), lineWidth: 1.5)
-                                    )
-                                    .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .keyboardShortcut(.cancelAction)
-                            .accessibilityLabel("Fermer")
-                            .accessibilityIdentifier("fermerFenetre")
-                        }
-                        .padding(.bottom, 14)
-                        contenu
-                    }
-                    .padding(.leading, 24)
-                    .padding([.trailing, .top], 12)
-                    .padding(.bottom, 24)
-                    .background {
-                        RoundedRectangle(cornerRadius: 14).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
-                            .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
-                    }
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.acier), lineWidth: 2))
-                    .frame(maxWidth: largeurMax)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
-                    .frame(minWidth: geo.size.width, minHeight: geo.size.height)
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .scrollIndicators(.automatic)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityAction(.escape, fermer)
-        .onAppear { focusTitre = true }
-    }
-}
-
 // MARK: - documents
 
-/// La fenêtre « Documents » (23.10, soir, retour d'essai : « ajouter les docs, choisir le tag et cliquer sur envoyer
-/// pour envoyer sur Paperless, et une fois dans Paperless ils ne doivent plus apparaître ») : « Ajouter des documents »
+/// Les documents de l'espace MOI (28.10 : avant, une fenêtre ouverte depuis l'en-tête). 23.10, soir, retour d'essai :
+/// « ajouter les docs, choisir le tag et cliquer sur envoyer pour envoyer sur Paperless, et une fois dans Paperless ils
+/// ne doivent plus apparaître » : « Ajouter des documents »
 /// remplit « À envoyer » (rien ne part) ; « Étiquettes » et « Pour le » valent pour le lot ; « Envoyer à Paperless »
 /// l'envoie ; « En cours » suit chaque fichier jusqu'à son rangement, puis une ligne confirme (« 3 documents rangés
 /// dans Paperless — voir », 60 s) ; « À revoir » garde les vrais échecs (« Réessayer », « Retirer »). Un document rangé,
-/// ou déjà présent dans Paperless (un avertissement), quitte la fenêtre.
-struct FenetreDocuments: View {
+/// ou déjà présent dans Paperless (un avertissement), quitte la liste.
+struct DocumentsMoi: View {
     @Environment(Alfred.self) private var alfred
-    let fermer: () -> Void
     /// Le jour que le document concerne : aucun par défaut (le champ vide de la console).
     @State private var avecJour = false
     @State private var jour = Calendar.current.startOfDay(for: .now)
@@ -103,7 +19,7 @@ struct FenetreDocuments: View {
     @State private var etiquettes: [ChoixEtiquette] = []
 
     var body: some View {
-        Fenetre(titre: "Documents", fermer: fermer) {
+        BlocPage(titre: "Documents", largeurMax: 560) {
             VStack(alignment: .leading, spacing: 10) {
                 Depot()
                 if case .reserve(let texte)? = alfred.annexes?.accesDocuments {
@@ -665,14 +581,13 @@ enum DateDocument {
 
 // MARK: - notifications
 
-/// La fenêtre « Notifications » : la copie de celles des téléphones et les réponses d'Hermes annoncées, les nouvelles
-/// bordées du faisceau ; tout est marqué lu à l'ouverture ; « Tout effacer ».
-struct FenetreNotifications: View {
+/// Les notifications de l'espace MOI (28.10 : avant, une fenêtre) : la copie de celles des téléphones et les réponses
+/// d'Hermes annoncées, les nouvelles bordées du faisceau ; tout est marqué lu à l'arrivée dans MOI ; « Tout effacer ».
+struct NotificationsMoi: View {
     @Environment(Alfred.self) private var alfred
-    let fermer: () -> Void
 
     var body: some View {
-        Fenetre(titre: "Notifications", fermer: fermer) {
+        BlocPage(titre: "Notifications", largeurMax: 560) {
             let liste = alfred.annexes?.notifications ?? []
             VStack(alignment: .leading, spacing: 14) {
                 if liste.isEmpty {
@@ -690,7 +605,7 @@ struct FenetreNotifications: View {
             }
         }
         .task {
-            // comme la console : marquées lues seulement si la fenêtre est encore ouverte une fois la liste chargée
+            // comme la console : marquées lues seulement si MOI est encore à l'écran une fois la liste chargée
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             await alfred.annexes?.marquerLues()

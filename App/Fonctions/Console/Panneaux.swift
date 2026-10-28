@@ -227,7 +227,7 @@ private struct Badges: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            badge(FenetreReglages.duree(duree))
+            badge(ReglagesSysteme.duree(duree))
             badge(local ? "intent local" : "llm")
             if outils > 0 { badge("\(outils) outil\(outils > 1 ? "s" : "")") }
         }
@@ -436,7 +436,9 @@ struct PanneauEnvironnement: View {
 /// éteint (normal) ou pas encore mesuré. Un toucher ouvre l'historique dans Safari, si le relais en donne l'adresse.
 struct PastillesEtat: View {
     @Environment(Alfred.self) private var alfred
-    @Environment(\.openURL) private var ouvrir
+    /// 28.10 (« oui pour les pastilles ») : un toucher mène à SYSTÈME (les connecteurs) ; l'historique d'Uptime Kuma est
+    /// dans la fiche de chaque connecteur.
+    @Environment(NavigationConsole.self) private var navigation: NavigationConsole?
 
     var body: some View {
         if let etat = alfred.annexes?.etat, !etat.groupes.isEmpty {
@@ -456,16 +458,16 @@ struct PastillesEtat: View {
                 }
             }
             .dynamicTypeSize(...DynamicTypeSize.large)
-            if let kuma = etat.kuma {
+            if let navigation {
                 Button {
-                    ouvrir(kuma)
+                    navigation.aller(.systeme)
                 } label: {
                     contenu.frame(minHeight: 44).contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("État des services")
                 .accessibilityValue(Self.resume(etat))
-                .accessibilityHint("Historique dans Uptime Kuma")
+                .accessibilityHint("Les connecteurs, dans Système")
                 .accessibilityIdentifier("etatServices")
             } else {
                 // un seul élément pour VoiceOver, de 44 pt de haut (le cadre d'un élément se calcule sur son contenu :

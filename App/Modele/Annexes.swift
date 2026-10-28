@@ -9,7 +9,8 @@ import Observation
 /// - notifications : toutes les 15 s (la personne connectée seulement) ; toutes les 3 s pendant l'attente d'une réponse
 ///   d'Hermes posée ici (22.10), réclamée puis passée à la conversation pour être lue ;
 /// - liens : une fois (redemandés toutes les 15 s si la maison ne répond pas) ;
-/// - état des services : toutes les 30 s.
+/// - état des services : toutes les 30 s ;
+/// - connecteurs (28.10) : toutes les 30 s tant que l'espace SYSTÈME est à l'écran (`suivreConnecteurs`).
 /// Rien ne tourne app cachée : `suspendre()` arrête tout (une réclamation déjà partie finit, et sa réponse attend le
 /// retour à l'écran), `reprendre()` relit tout de suite.
 @Observable @MainActor
@@ -51,6 +52,12 @@ final class Annexes {
     private(set) var notificationsPermises = false
     private(set) var liens: [LienSysteme] = []
     private(set) var etat: EtatServices?
+    /// 28.10 (A-DECIDER 76) : les connecteurs de la page SYSTÈME (`GET /connecteurs`), selon la personne connectée ;
+    /// nil tant qu'ils n'ont pas été lus.
+    private(set) var connecteurs: ListeConnecteurs?
+    /// La dernière lecture des connecteurs a échoué : la phrase de la console (« La maison ne répond pas… »).
+    private(set) var erreurConnecteurs: String?
+    private(set) var lectureConnecteurs = false
 
     /// 22.10 : la conversation qui attend une réponse d'Hermes posée ici, et la lit.
     @ObservationIgnored weak var conversation: Conversation?
@@ -71,6 +78,8 @@ final class Annexes {
     @ObservationIgnored private var actif = false
     /// L'app est cachée : rien ne repart avant `reprendre()`, même une reconnexion.
     @ObservationIgnored private var cachee = false
+    /// L'espace SYSTÈME est à l'écran : les connecteurs sont relus toutes les 30 s.
+    @ObservationIgnored private var connecteursSuivis = false
 
     init(acces: any AccesRelais, aviser: @escaping @MainActor (String, Conversation.Avis.Genre) -> Void) {
         self.acces = acces
@@ -108,6 +117,9 @@ final class Annexes {
         actif = true
         boucle("etat") { [weak self] in await self?.chargerEtat() ?? .seconds(30) }
         boucle("documents") { [weak self] in await self?.chargerDocuments() ?? .seconds(60) }
+        if connecteursSuivis {
+            boucle("connecteurs") { [weak self] in await self?.chargerConnecteurs() }
+        }
         if connecte {
             boucle("notifications") { [weak self] in await self?.chargerNotifications() ?? .seconds(15) }
             boucle("liens") { [weak self] in await self?.chargerLiens() }
@@ -156,6 +168,24 @@ final class Annexes {
             default: nil
             }
         if l != etiquettes { etiquettes = l }
+    }
+
+    /// 28.10 : l'espace SYSTÈME s'ouvre (lecture tout de suite, puis toutes les 30 s) ou se ferme (plus de relecture).
+    func suivreConnecteurs(_ suivre: Bool) {
+        connecteursSuivis = suivre
+        guard actif else { return }
+        if suivre {
+            boucle("connecteurs") { [weak self] in await self?.chargerConnecteurs() }
+        } else {
+            taches["connecteurs"]?.cancel()
+            taches["connecteurs"] = nil
+        }
+    }
+
+    /// « Revérifier » (la console : `#connecteurs-revoir`) : une lecture tout de suite.
+    func relireConnecteurs() {
+        guard actif else { return }
+        boucle("connecteurs") { [weak self] in await self?.chargerConnecteurs() }
     }
 
     func relireNotifications() {
@@ -254,6 +284,28 @@ final class Annexes {
             conversation.recevoirDifferee(
                 texte: r.message ?? n.message, chemin: r.cheminVoix, attente: numero, livrer: visible)
         }
+    }
+
+    /// Comme la console : 503 = la maison ne répond pas (le relais n'a pas pu lire le compte) ; une autre erreur est
+    /// dite avec son code ; la dernière liste reste affichée. Relus toutes les 30 s tant que SYSTÈME est à l'écran.
+    private func chargerConnecteurs() async -> Duration? {
+        lectureConnecteurs = true
+        defer { lectureConnecteurs = false }
+        do {
+            let (statut, corps) = try await acces.lire("/connecteurs")
+            if statut == 200, let l = ListeConnecteurs.lire(corps) {
+                if l != connecteurs { connecteurs = l }
+                erreurConnecteurs = nil
+            } else {
+                erreurConnecteurs =
+                    statut == 503
+                    ? "La maison ne répond pas : l’état des connecteurs revient dès qu’elle répond."
+                    : "Les connecteurs ne répondent pas (HTTP \(statut))."
+            }
+        } catch {
+            erreurConnecteurs = "Les connecteurs ne répondent pas."
+        }
+        return connecteursSuivis ? .seconds(30) : nil
     }
 
     /// Comme la console : maison muette (5xx) → redemandée toutes les 15 s ; une liste vide n'est pas redemandée.

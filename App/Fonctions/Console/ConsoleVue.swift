@@ -3,18 +3,22 @@ import SwiftUI
 
 /// La console d'Alfred, en natif : la même interface que la console web, sur iPhone, iPad et Mac.
 ///
-/// Comme la console : au-delà de 1100 pt de large (iPad à l'horizontale, Mac), l'assistant à gauche, la roue au
-/// centre, l'environnement à droite, les jauges et la voix en bas ; en dessous (iPhone, iPad à la verticale), trois
-/// vues (Alfred, Pièces, Environnement) choisies en bas de l'écran.
+/// 28.10 (« oui 4 espaces ») : ALFRED · MAISON · MOI · SYSTÈME. Au-delà de 1100 pt de large (iPad à l'horizontale,
+/// Mac) : le rail des espaces à gauche, sous l'en-tête et au-dessus de la barre de la voix ; ALFRED = la console d'avant
+/// (l'assistant à gauche, la roue au centre, l'environnement à droite) ; MAISON = la roue et l'environnement, l'assistant
+/// replié. En dessous (iPhone, iPad à la verticale) : la barre du bas ; ALFRED = l'assistant, MAISON = Pièces |
+/// Environnement. MOI (documents, notifications) et SYSTÈME (connecteurs, réglages, autres systèmes) sont des pages ;
+/// les jauges et la voix restent en bas partout (Alfred est toujours à portée).
 struct ConsoleVue: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
     @Environment(\.animationsCoupees) private var immobile
-    @State private var vue = VueConsole.pieces
+    @State private var navigation = NavigationConsole(espace: .alfred)
+    /// L'espace d'une ouverture à l'autre (la console : l'adresse, `#moi`…) ; vide : celui par défaut de la largeur.
+    @SceneStorage("console.espace") private var espaceGarde = ""
+    @State private var espacePose = false
     @State private var choisi: String?
     @State private var ecrire = false
-    @State private var fenetre: FenetreConsole?
-    @State private var liensOuverts = false
     /// Les panneaux de côté de la disposition large, masqués par leur poignée (choix gardé sur l'appareil, comme la
     /// console le garde dans le navigateur).
     @AppStorage("console.assistantMasque") private var assistantMasque = false
@@ -26,18 +30,6 @@ struct ConsoleVue: View {
     /// du 21.10 : mesurée sur la place laissée par le clavier, les jauges disparaissaient et la roue descendait).
     @State private var hauteurSansClavier: CGFloat = 0
 
-    enum VueConsole: Hashable, CaseIterable {
-        case alfred, pieces, environnement
-
-        var titre: String {
-            switch self {
-            case .alfred: "Alfred"
-            case .pieces: "Pièces"
-            case .environnement: "Environnement"
-            }
-        }
-    }
-
     var body: some View {
         GeometryReader { geo in
             let large = geo.size.width > 1100
@@ -45,13 +37,16 @@ struct ConsoleVue: View {
                 Console.fond
                 echapConversation
                 VStack(spacing: 0) {
-                    EnTeteConsole(largeur: geo.size.width, fenetre: $fenetre, liensOuverts: $liensOuverts)
+                    EnTeteConsole(largeur: geo.size.width)
                         .zIndex(1)
                     Group {
                         if large {
-                            dispositionLarge(geo.size)
+                            HStack(spacing: 0) {
+                                RailEspaces(navigation: navigation)
+                                contenuLarge(geo.size)
+                            }
                         } else {
-                            dispositionCompacte
+                            contenuCompact
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -59,9 +54,9 @@ struct ConsoleVue: View {
                         large: large,
                         jauges: (hauteurSansClavier > 0 ? hauteurSansClavier : geo.size.height) >= 640 || large,
                         ecrire: $ecrire,
-                        raccourcis: fenetre == nil && !liensOuverts)
+                        raccourcis: true)
                     if !large {
-                        NavConsole(vue: $vue)
+                        BarreEspaces(navigation: navigation)
                     }
                 }
                 // mesurée sur la pile elle-même, AVANT « ignoresSafeArea » : après, c'est le cadre réduit par le
@@ -73,60 +68,41 @@ struct ConsoleVue: View {
                 }
                 .ignoresSafeArea(.keyboard)
                 if ecrire {
-                    // comme la console : la saisie se ferme à l'envoi, et le téléphone montre les échanges
-                    SaisieConsole(ouverte: $ecrire) { if !large { vue = .alfred } }
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 12)
-                        .frame(maxWidth: large ? 640 : .infinity)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // comme la console : la saisie se ferme à l'envoi ; le téléphone, ou une page, montre les échanges
+                    SaisieConsole(ouverte: $ecrire) {
+                        if !large || navigation.espace == .moi || navigation.espace == .systeme {
+                            navigation.aller(.alfred)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: large ? 640 : .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .overlay(alignment: .top) {
                 AvisConsole()
                     .padding(.top, 84)
             }
-            .overlay(alignment: .topTrailing) {
-                if liensOuverts {
-                    ZStack(alignment: .topTrailing) {
-                        // un toucher ailleurs referme la liste (la console : un clic ailleurs)
-                        Color.black.opacity(0.001)
-                            .ignoresSafeArea()
-                            .onTapGesture { liensOuverts = false }
-                            .accessibilityHidden(true)
-                        ListeLiens(ouverte: $liensOuverts)
-                            .padding(.top, geo.size.width > 560 ? 70 : 62)
-                            .padding(.trailing, 12)
-                    }
-                    .transition(.opacity)
-                }
-            }
-            .fullScreenCover(item: $fenetre) { f in
-                Group {
-                    switch f {
-                    case .documents: FenetreDocuments { fermerFenetre() }
-                    case .notifications: FenetreNotifications { fermerFenetre() }
-                    case .reglages: FenetreReglages { fermerFenetre() }
-                    }
-                }
-                // la console reste devinée sous le voile de la fenêtre
-                .presentationBackground(.clear)
-                // sur Mac (app iPad), la présentation n'hérite pas toujours de l'environnement : Réglages plantait en
-                // lisant la conversation (retour d'essai, 23.10) ; les deux objets sont donc redonnés ici
-                .environment(alfred)
-                .environment(conversation)
-            }
-            .onChange(of: fenetre) { _, f in
-                if f != nil {
-                    liensOuverts = false
-                    ecrire = false
-                }
+            .onAppear {
+                guard !espacePose else { return }
+                espacePose = true
+                // la démo (tests d'interface, examen d'Apple) repart toujours de l'espace par défaut
+                navigation.espace =
+                    alfred.demo
+                    ? Espace.parDefaut(large: large) : Espace(rawValue: espaceGarde) ?? Espace.parDefaut(large: large)
             }
         }
+        .environment(navigation)
+        .onChange(of: navigation.espace) { _, e in
+            espaceGarde = e.rawValue
+            if e == .moi || e == .systeme { choisi = nil }
+        }
         .animation(.smooth(duration: 0.25), value: ecrire)
-        // tests d'interface : aucune transition (l'audit juge l'écran final, pas un fondu)
-        .animation(immobile ? nil : .smooth(duration: 0.15), value: liensOuverts)
+        .animation(immobile ? nil : .smooth(duration: 0.15), value: navigation.espace)
         .sensoryFeedback(trigger: conversation.enConversation) { _, ouvert in ouvert ? .start : .stop }
         .sensoryFeedback(.success, trigger: conversation.reponses)
+        .sensoryFeedback(.selection, trigger: navigation.espace)
         .sensoryFeedback(trigger: alfred.dernierRetour) { _, retour in
             switch retour?.issue {
             case .confirmee: .success
@@ -136,9 +112,9 @@ struct ConsoleVue: View {
         }
     }
 
-    /// Échap revient à la pièce (ni liste des liens, ni saisie, ni fenêtre au-dessus) ; la console, dans l'ordre :
-    /// la liste des liens, la saisie, la pièce, puis la conversation (`keydown`).
-    private var echapLibre: Bool { !liensOuverts && !ecrire && fenetre == nil }
+    /// Échap revient à la pièce (ni saisie au-dessus) ; la console, dans l'ordre : la saisie, la pièce, puis la
+    /// conversation (`keydown`).
+    private var echapLibre: Bool { !ecrire }
 
     /// Échap ferme la conversation quand rien d'autre n'est ouvert (un bouton sans surface : seul son raccourci compte).
     @ViewBuilder private var echapConversation: some View {
@@ -151,33 +127,53 @@ struct ConsoleVue: View {
         }
     }
 
-    /// Une fenêtre se ferme d'un coup, comme elle s'est ouverte.
-    private func fermerFenetre() {
-        var t = Transaction()
-        t.disablesAnimations = true
-        withTransaction(t) { fenetre = nil }
-    }
-
     // MARK: - dispositions
 
-    @ViewBuilder private var dispositionCompacte: some View {
-        switch vue {
-        case .pieces:
-            VuePieces(choisi: $choisi, compact: true, debut: debut, echap: echapLibre)
+    @ViewBuilder private var contenuCompact: some View {
+        switch navigation.espace {
         case .alfred:
             PanneauAlfred()
                 .padding(12)
-        case .environnement:
-            PanneauEnvironnement()
-                .padding(12)
+        case .maison:
+            VStack(spacing: 0) {
+                SegmentMaison(navigation: navigation)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                switch navigation.vueMaison {
+                case .pieces:
+                    VuePieces(choisi: $choisi, compact: true, debut: debut, echap: echapLibre)
+                case .environnement:
+                    PanneauEnvironnement()
+                        .padding(12)
+                }
+            }
+        case .moi:
+            PageMoi(large: false)
+        case .systeme:
+            PageSysteme(large: false)
         }
     }
 
-    private func dispositionLarge(_ taille: CGSize) -> some View {
+    @ViewBuilder private func contenuLarge(_ taille: CGSize) -> some View {
+        switch navigation.espace {
+        case .alfred:
+            dispositionLarge(taille, assistant: true)
+        case .maison:
+            dispositionLarge(taille, assistant: false)
+        case .moi:
+            PageMoi(large: true)
+        case .systeme:
+            PageSysteme(large: true)
+        }
+    }
+
+    /// La console d'avant, sans le rail : l'assistant (ALFRED seulement), la roue, l'environnement.
+    private func dispositionLarge(_ taille: CGSize, assistant: Bool) -> some View {
         // la console : 310 et 330 pt ; 270 et 300 jusqu'à 1350 pt de large ; un panneau masqué rend sa place à la roue
         let etroit = taille.width <= 1350
+        let avecAssistant = assistant && !assistantMasque
         return HStack(spacing: 0) {
-            if !assistantMasque {
+            if avecAssistant {
                 PanneauAlfred()
                     .padding(.vertical, etroit ? 12 : 16)
                     .padding(.horizontal, etroit ? 8 : 12)
@@ -186,7 +182,10 @@ struct ConsoleVue: View {
             }
             VuePieces(choisi: $choisi, compact: false, debut: debut, echap: echapLibre)
                 .overlay(alignment: .leading) {
-                    PoigneePanneau(cote: .assistant, masque: $assistantMasque)
+                    // MAISON : l'assistant est replié par l'espace, sans toucher au choix enregistré ni à sa poignée
+                    if assistant {
+                        PoigneePanneau(cote: .assistant, masque: $assistantMasque)
+                    }
                 }
                 .overlay(alignment: .trailing) {
                     PoigneePanneau(cote: .environnement, masque: $environnementMasque)
@@ -248,67 +247,6 @@ struct VuePieces: View {
     }
 }
 
-// MARK: - navigation (téléphone)
-
-/// Les trois vues de la console sur téléphone : capitales espacées, la vue choisie en champagne, soulignée du faisceau.
-/// Comme la console, « Environnement » a 1,4 fois la place des deux autres. Le texte garde la taille de la console,
-/// comme une barre d'onglets du système ; un appui long le montre en grand (visionneuse de grand contenu).
-struct NavConsole: View {
-    @Binding var vue: ConsoleVue.VueConsole
-
-    var body: some View {
-        GeometryReader { g in
-            let unite = (g.size.width - 16) / 3.4
-            HStack(spacing: 8) {
-                ForEach(ConsoleVue.VueConsole.allCases, id: \.self) { v in
-                    bouton(v)
-                        .frame(width: unite * (v == .environnement ? 1.4 : 1))
-                }
-            }
-        }
-        .frame(height: 50)
-        .dynamicTypeSize(...DynamicTypeSize.large)
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .background(alignment: .top) {
-            ZStack(alignment: .top) {
-                Console.bandeau.ignoresSafeArea(edges: .bottom)
-                Rectangle().fill(Color(.trait)).frame(height: 1.5)
-            }
-            .accessibilityHidden(true)
-        }
-        .animation(.smooth(duration: 0.2), value: vue)
-    }
-
-    private func bouton(_ v: ConsoleVue.VueConsole) -> some View {
-        Button {
-            vue = v
-        } label: {
-            Text(v.titre)
-                .font(.caption2.weight(.heavy))
-                .tracking(1.6)
-                .textCase(.uppercase)
-                .foregroundStyle(vue == v ? Color(.champagne) : Color(.texteSecondaire))
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .overlay(alignment: .top) {
-                    if vue == v {
-                        Rectangle()
-                            .fill(Color(.faisceau))
-                            .frame(height: 2)
-                            .shadow(color: Color(.faisceau).opacity(0.55), radius: 5)
-                            .padding(.horizontal, 24)
-                            .offset(y: -6)
-                    }
-                }
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityShowsLargeContentViewer()
-        .accessibilityAddTraits(vue == v ? .isSelected : [])
-        .accessibilityIdentifier("onglet-\(v)")
-    }
-}
-
 // MARK: - le bas : jauges et voix
 
 /// Le bas de la console : les jauges (et la consommation sur grand écran), « Parler à Alfred », « Écrire », le niveau
@@ -319,8 +257,8 @@ struct BasConsole: View {
     let large: Bool
     let jauges: Bool
     @Binding var ecrire: Bool
-    /// Les raccourcis du clavier (espace pour parler, / pour écrire), coupés quand une fenêtre ou la saisie est
-    /// ouverte (comme la console : « des raccourcis qui respectent les champs »).
+    /// Les raccourcis du clavier (espace pour parler, / pour écrire), coupés quand la saisie est ouverte (comme la
+    /// console : « des raccourcis qui respectent les champs » ; la fiche d'un connecteur est une fenêtre modale).
     let raccourcis: Bool
 
     var body: some View {

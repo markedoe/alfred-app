@@ -1,26 +1,20 @@
 import AlfredKit
 import SwiftUI
 
-/// Les fenêtres de la console, ouvertes depuis l'en-tête (une à la fois, comme les `<dialog>` de la console).
-enum FenetreConsole: String, Identifiable, Sendable {
-    case documents, notifications, reglages
-    var id: String { rawValue }
-}
-
-/// L'en-tête de la console telle qu'on la voit connecté : ALFRED / MANOR COMMAND, le lien avec la maison, Documents,
-/// Notifications (la personne connectée), la voix reconnue ; à droite les réglages, les autres systèmes et le compte,
-/// le nom de la personne dessous.
+/// L'en-tête de la console telle qu'on la voit connecté : ALFRED / MANOR COMMAND, le lien avec la maison,
+/// Notifications (la personne connectée ; il mène à l'espace MOI), la voix reconnue ; à droite le compte, le nom de la
+/// personne dessous. 28.10 (« oui 4 espaces ») : Documents, Réglages et les autres systèmes l'ont quitté (espaces MOI
+/// et SYSTÈME).
 ///
-/// Comme la console : jusqu'à 560 pt, les boutons sont des icônes (et le lien un point de couleur) ; au-delà, « Documents »
-/// et « Notifications » s'écrivent ; au-delà de 1100 pt, « LIEN » au-dessus de « Connecté ». Chaque bouton garde une
+/// Comme la console : jusqu'à 560 pt, les boutons sont des icônes (et le lien un point de couleur) ; au-delà,
+/// « Notifications » s'écrit ; au-delà de 1100 pt, « LIEN » au-dessus de « Connecté ». Chaque bouton garde une
 /// cible de 44 pt, qui déborde de son cadre dessiné (34 ou 38 pt) : les écarts de la console se mesurent entre les
 /// cadres, pas entre les cibles. Quand la place manque (la console : jusqu'à 380 px), les lettres de la marque se
 /// resserrent.
 struct EnTeteConsole: View {
     @Environment(Alfred.self) private var alfred
+    @Environment(NavigationConsole.self) private var navigation: NavigationConsole?
     let largeur: CGFloat
-    @Binding var fenetre: FenetreConsole?
-    @Binding var liensOuverts: Bool
     @State private var quitter = false
 
     private var large: Bool { largeur > 1100 }
@@ -85,11 +79,9 @@ struct EnTeteConsole: View {
         }
     }
 
-    /// Une fenêtre s'ouvre d'un coup, comme un `<dialog>` de la console (sans la montée d'une feuille d'iOS).
-    private func ouvrir(_ f: FenetreConsole) {
-        var t = Transaction()
-        t.disablesAnimations = true
-        withTransaction(t) { fenetre = f }
+    /// Notifications → l'espace MOI, la liste en vue.
+    private func notifications() {
+        navigation?.aller(.moi, ancre: "notifications")
     }
 
     @ViewBuilder
@@ -101,23 +93,19 @@ struct EnTeteConsole: View {
         }
     }
 
-    /// Le téléphone (la console jusqu'à 560 px, mesurée à 390 et 375 px) : la marque, 8, le point du lien, 8, les cadres
-    /// de Documents et Notifications (38 pt, 8 entre eux), au moins 8, puis les trois icônes à droite. Les icônes de
-    /// droite sont à 10 pt l'une de l'autre au lieu de 6 : leurs cibles de 44 pt se touchent.
+    /// Le téléphone (la console jusqu'à 560 px, mesurée à 390 et 375 px) : la marque, 8, le point du lien, 8, le cadre
+    /// de Notifications (38 pt), au moins 8, puis le compte à droite.
     private func ligneTelephone(serre: Bool) -> some View {
         HStack(spacing: 0) {
             MarqueEnTete(textes: false, serre: serre, lien: LienMaison.mot(alfred.liaison))
             LienMaison(texte: false, etiquette: false)
                 .padding(.horizontal, 8)
             // les cibles de 44 pt débordent de 3 pt leurs cadres de 38 : 8 pt entre les cadres, comme la console
-            HStack(spacing: 8 - 2 * BoutonFenetre.debord) {
-                BoutonDocuments(texte: false) { ouvrir(.documents) }
-                if alfred.annexes?.notificationsPermises == true {
-                    BoutonNotifications(texte: false) { ouvrir(.notifications) }
-                }
+            if alfred.annexes?.notificationsPermises == true {
+                BoutonNotifications(texte: false, action: notifications)
+                    .padding(.leading, -BoutonFenetre.debord)
             }
-            .padding(.leading, -BoutonFenetre.debord)
-            // au moins 8 pt entre le cadre de Notifications et celui des réglages (3 + 5 de débord)
+            // au moins 8 pt entre le cadre de Notifications et celui du compte (3 + 5 de débord)
             Spacer(minLength: 0)
             HStack(spacing: 0) {
                 boutonsDroite
@@ -132,11 +120,8 @@ struct EnTeteConsole: View {
                 Rectangle().fill(Color(.trait)).frame(width: 1, height: 24).accessibilityHidden(true)
             }
             LienMaison(texte: true, etiquette: large)
-            HStack(spacing: 10) {
-                BoutonDocuments(texte: true) { ouvrir(.documents) }
-                if alfred.annexes?.notificationsPermises == true {
-                    BoutonNotifications(texte: true) { ouvrir(.notifications) }
-                }
+            if alfred.annexes?.notificationsPermises == true {
+                BoutonNotifications(texte: true, action: notifications)
             }
             if largeur > 760, let v = alfred.voixReconnue {
                 BadgeVoix(voix: v, flottant: false)
@@ -149,24 +134,9 @@ struct EnTeteConsole: View {
         }
     }
 
-    /// Les réglages, les autres systèmes (s'il y en a) et le compte.
+    /// Le compte (28.10 : les réglages et les autres systèmes sont dans l'espace SYSTÈME).
     @ViewBuilder
     private var boutonsDroite: some View {
-        BoutonEnTete(icone: "gearshape", libelle: "Réglages", actif: fenetre == .reglages) {
-            ouvrir(.reglages)
-        }
-        .accessibilityIdentifier("reglages")
-        if let liens = alfred.annexes?.liens, !liens.isEmpty {
-            // Échap referme la liste ouverte (la console : `keydown`, avant tout le reste)
-            BoutonEnTete(
-                icone: "square.grid.2x2", libelle: "Autres systèmes", actif: liensOuverts,
-                raccourci: liensOuverts ? .cancelAction : nil
-            ) {
-                liensOuverts.toggle()
-            }
-            .accessibilityIdentifier("liens")
-            .accessibilityAddTraits(liensOuverts ? .isSelected : [])
-        }
         compte
     }
 
@@ -250,30 +220,6 @@ private struct CadreIcone<Contenu: View>: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 8).strokeBorder(
                     actif ? Color(.faisceau) : Color(.trait), lineWidth: 1.5))
-    }
-}
-
-/// Un bouton-icône de l'en-tête : le cadre de 34 pt dans une cible de 44 pt.
-private struct BoutonEnTete: View {
-    let icone: String
-    let libelle: String
-    let actif: Bool
-    var raccourci: KeyboardShortcut?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            CadreIcone(actif: actif) { Image(systemName: icone) }
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut(raccourci)
-        .accessibilityLabel(libelle)
-        .accessibilityShowsLargeContentViewer {
-            Image(systemName: icone)
-            Text(libelle)
-        }
     }
 }
 
@@ -373,23 +319,6 @@ struct BoutonFenetre: View {
     }
 }
 
-private struct BoutonDocuments: View {
-    @Environment(Alfred.self) private var alfred
-    let texte: Bool
-    let action: () -> Void
-
-    var body: some View {
-        // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (en cours, refusés)
-        let n = alfred.annexes?.pastilleDocuments ?? 0
-        BoutonFenetre(
-            titre: "Documents", icone: "doc", texte: texte, nombre: n, fondCompteur: Color(.faisceauSombre),
-            texteCompteur: Color(.glace),
-            libelle: n > 0 ? "Documents, \(n) à traiter" : "Documents", action: action
-        )
-        .accessibilityIdentifier("documents")
-    }
-}
-
 private struct BoutonNotifications: View {
     @Environment(Alfred.self) private var alfred
     let texte: Bool
@@ -473,60 +402,5 @@ struct LienMaison: View {
         case .deconnecte: "Déconnecté"
         case .fatal: "!"
         }
-    }
-}
-
-// MARK: - autres systèmes
-
-/// La liste des autres systèmes (`#liens`), sous l'icône : leur nom et une note ; chacun s'ouvre dans Safari.
-struct ListeLiens: View {
-    @Environment(Alfred.self) private var alfred
-    @Environment(\.openURL) private var ouvrir
-    @Binding var ouverte: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(alfred.annexes?.liens ?? []) { l in
-                Button {
-                    ouverte = false
-                    ouvrir(l.url)
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(l.nom).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.glace))
-                        if let note = l.note, !note.isEmpty {
-                            Text(note).font(.caption).foregroundStyle(Color(.texteSecondaire))
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(StyleLigneLien())
-                .accessibilityHint("S’ouvre dans Safari")
-            }
-        }
-        .padding(6)
-        .frame(minWidth: 230, maxWidth: 320)
-        .fixedSize(horizontal: true, vertical: false)
-        .background {
-            RoundedRectangle(cornerRadius: 10).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
-                .shadow(color: .black.opacity(0.7), radius: 17, y: 14)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.acier), lineWidth: 2))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Autres systèmes")
-        .accessibilityAction(.escape) { ouverte = false }
-        .accessibilityIdentifier("listeLiens")
-    }
-}
-
-/// Une ligne de la liste des liens : éclairée au toucher (#183047), comme au survol dans la console.
-private struct StyleLigneLien: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                configuration.isPressed ? Color(red: 24 / 255, green: 48 / 255, blue: 71 / 255) : .clear,
-                in: .rect(cornerRadius: 6))
     }
 }

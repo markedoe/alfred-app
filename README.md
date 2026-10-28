@@ -4,9 +4,10 @@ L’app native d’**Alfred**, l’assistant vocal d’une maison pilotée par H
 maison et répond de sa voix ; on voit la maison pièce par pièce, avec l’état qu’elle confirme réellement.
 
 **C’est la console d’Alfred, en natif** (« Manor Command ») : la même roue des pièces autour du réacteur, les mêmes
-jauges, les mêmes panneaux Alfred et Environnement, sombre seulement. Sur iPhone (et iPad à la verticale), trois vues
-choisies en bas de l’écran ; au-delà de 1100 pt de large (iPad à l’horizontale, Mac à puce Apple), la disposition
-large de la console, côte à côte.
+jauges, les mêmes panneaux Alfred et Environnement, sombre seulement. Quatre espaces, comme la console :
+**ALFRED · MAISON · MOI · SYSTÈME** — en bas de l’écran sur iPhone (et iPad à la verticale), dans un rail à gauche
+au-delà de 1100 pt de large (iPad à l’horizontale, Mac à puce Apple), où ALFRED garde la disposition large de la
+console, côte à côte, et MAISON replie l’assistant.
 
 **L’app ne parle qu’à la maison**, par son relais (le serveur de la console d’Alfred). Il n’y a ni cloud, ni compte
 tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, et jamais sur internet.
@@ -36,16 +37,21 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
     n’est jamais supposé ni renvoyé.
 - **L’environnement** : l’extérieur (météo), les pièces mesurées, l’énergie ; les jauges en bas de la console ;
   l’état des services de la maison (pastilles).
-- **Les fenêtres de l’en-tête, comme la console connectée**
-  - *Documents* : comme la console, ajouter un ou plusieurs documents (photothèque et fichiers en sélection
+- **MOI et SYSTÈME, comme la console connectée** (Notifications, dans l’en-tête, mène à MOI ; les pastilles d’état, à
+  SYSTÈME)
+  - *Documents* (MOI) : comme la console, ajouter un ou plusieurs documents (photothèque et fichiers en sélection
     multiple, scanner de documents d’iOS) dans « À envoyer » (nom et taille ; trop lourd ou type refusé : dit
     d’emblée), choisir leurs étiquettes (de la liste de la maison, ou nouvelles) et le jour qu’ils concernent, puis
     « Envoyer à Paperless » ; « En cours » suit chaque fichier, une ligne confirme ce qui est rangé ou déjà présent
-    (« voir » ouvre Paperless), et un document rangé quitte la fenêtre ; « À revoir » garde les vrais échecs, avec
+    (« voir » ouvre Paperless), et un document rangé quitte la liste ; « À revoir » garde les vrais échecs, avec
     leur motif (« Réessayer », « Retirer »).
-  - *Notifications* : la copie de celles des téléphones de la personne connectée, marquées lues à l’ouverture.
-  - *Autres systèmes* : les liens que la maison donne selon le compte, ouverts dans Safari.
-  - *Réglages & état* : le modèle, les entités, la dernière réponse, le choix et l’essai du micro ; puis le compte,
+  - *Notifications* (MOI) : la copie de celles des téléphones de la personne connectée, marquées lues à l’arrivée.
+  - *Connecteurs* (SYSTÈME) : tout ce à quoi Alfred est relié, une carte chacun — son logo, une ligne, son état en mots
+    (« En service », « En veille · PC éteint », « En panne depuis… »), à la maison ou sur Internet, ce qu’Alfred en
+    fait — et sa fiche (ce qu’il en fait, ce qu’il ne fait jamais, où vont les données, qui y a accès, à essayer,
+    l’historique de la surveillance). Les textes viennent de la maison, communs avec la console.
+  - *Autres systèmes* (SYSTÈME) : les liens que la maison donne selon le compte, ouverts dans Safari.
+  - *Réglages & état* (SYSTÈME) : le modèle, les entités, la dernière réponse, le choix et l’essai du micro ; puis le compte,
     la lecture des réponses écrites et les engagements de confidentialité.
 - **Mode invités** : quand la maison le demande, l’historique, le résumé, les documents et les notifications sont
   masqués.

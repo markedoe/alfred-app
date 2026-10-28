@@ -24,6 +24,12 @@ final class AccesDemo: AccesRelais, @unchecked Sendable {
         case "/docs": corps = await annexes.documents()
         case "/docs/etiquettes": corps = AnnexesDemo.etiquettes
         case "/notifications": corps = await annexes.notifications()
+        case "/connecteurs":
+            // 28.10 : la réponse du relais (textes, logos, états), liens vers les sites publics des projets
+            guard let url = Bundle.main.url(forResource: "connecteurs-demo", withExtension: "json"),
+                let donnees = try? Data(contentsOf: url)
+            else { return (404, Data()) }
+            return (200, donnees)
         default: return (404, Data())
         }
         return (200, Data(corps.enTexte().utf8))

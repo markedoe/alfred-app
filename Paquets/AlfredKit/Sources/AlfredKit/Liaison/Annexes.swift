@@ -1102,17 +1102,21 @@ public struct EtatServices: Sendable, Equatable, Decodable {
         }
 
         /// Comme la console : sans fuseau, l'heure est en UTC.
-        public var dateDepuis: Date? {
-            guard var s = depuis?.replacingOccurrences(of: " ", with: "T"), !s.isEmpty else { return nil }
-            if !s.contains("Z"), !s.contains("+"), s.range(of: #"-\d\d:\d\d$"#, options: .regularExpression) == nil {
-                s += "Z"
-            }
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let d = f.date(from: s) { return d }
-            f.formatOptions = [.withInternetDateTime]
-            return f.date(from: s)
+        public var dateDepuis: Date? { EtatServices.date(depuis) }
+    }
+
+    /// Une heure d'Uptime Kuma (« depuis ») : « AAAA-MM-JJ HH:MM:SS(.ms) » sans fuseau = UTC, ou ISO 8601 ; nil si vide
+    /// ou illisible. Partagée avec les connecteurs.
+    static func date(_ depuis: String?) -> Date? {
+        guard var s = depuis?.replacingOccurrences(of: " ", with: "T"), !s.isEmpty else { return nil }
+        if !s.contains("Z"), !s.contains("+"), s.range(of: #"-\d\d:\d\d$"#, options: .regularExpression) == nil {
+            s += "Z"
         }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
     }
 
     public let groupes: [Groupe]

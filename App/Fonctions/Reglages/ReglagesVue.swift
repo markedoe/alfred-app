@@ -1,21 +1,20 @@
 import AlfredKit
 import SwiftUI
 
-/// « Réglages & état », la fenêtre de la console (décision du 18.10 : la fenêtre de la console, puis les
-/// réglages propres à l'app dessous) : le modèle, les entités, la dernière réponse, le micro (choix, autorisation,
+/// « Réglages & état », dans l'espace SYSTÈME (28.10 : avant, une fenêtre ; décision du 18.10 : le contenu de la
+/// console, puis les réglages propres à l'app dessous) : le modèle, les entités, la dernière réponse, le micro (choix, autorisation,
 /// essai), la note de la console ; puis le compte, la lecture des réponses écrites, les engagements de confidentialité,
 /// la version et le code source.
-struct FenetreReglages: View {
+struct ReglagesSysteme: View {
     @Environment(Alfred.self) private var alfred
     @Environment(Conversation.self) private var conversation
-    let fermer: () -> Void
     @State private var confirmer = false
     @State private var entrees: [EntreeMicro] = []
     @State private var choisie: String?
     @State private var autorise = false
 
     var body: some View {
-        Fenetre(titre: "Réglages & état", largeurMax: 470, fermer: { fermerFenetre() }) {
+        BlocPage(titre: "Réglages & état") {
             VStack(alignment: .leading, spacing: 0) {
                 LigneEtat("Modèle", valeur: alfred.moteur ?? "—")
                 LigneEtat("Entités", valeur: alfred.nombreEntites.map(String.init) ?? "—")
@@ -61,22 +60,15 @@ struct FenetreReglages: View {
             }
         }
         .onAppear(perform: lireEntrees)
+        // comme la console : l'essai du micro s'arrête quand on quitte SYSTÈME (« Test interrompu »)
+        .onDisappear { conversation.arreterEssai() }
         .confirmationDialog("Se déconnecter de la maison ?", isPresented: $confirmer, titleVisibility: .visible) {
             Button("Se déconnecter", role: .destructive) {
-                Task {
-                    fermer()
-                    await alfred.seDeconnecter()
-                }
+                Task { await alfred.seDeconnecter() }
             }
         } message: {
             Text("La connexion de cet appareil est supprimée dans Home Assistant. Vous pourrez vous reconnecter.")
         }
-    }
-
-    private func fermerFenetre() {
-        // comme la console : l'essai du micro s'arrête avec la fenêtre (« Test interrompu »)
-        conversation.arreterEssai()
-        fermer()
     }
 
     /// « 1.4s » (la console : `dt.toFixed(1) + "s"`).
@@ -209,10 +201,7 @@ struct FenetreReglages: View {
             // la démo n'a pas de compte : on la quitte, rien à déconnecter
             if alfred.demo {
                 Button("Quitter la démonstration") {
-                    Task {
-                        fermer()
-                        await alfred.quitterDemo()
-                    }
+                    Task { await alfred.quitterDemo() }
                 }
                 .buttonStyle(StyleConsole())
                 .largeurDuTexte()

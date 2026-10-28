@@ -3,8 +3,9 @@ import XCTest
 
 /// Les parcours principaux, sur la maison de démonstration (aucun réseau, aucun micro) : écrire à Alfred et lire sa
 /// réponse dans les échanges ; allumer une pièce depuis la roue, l'état affiché étant celui que la maison confirme ;
-/// les fenêtres de l'en-tête (documents, notifications, autres systèmes, réglages) ; l'audit d'accessibilité d'Apple
-/// sur chaque vue et chaque fenêtre ; la disposition large (iPad à l'horizontale). Des captures sont jointes au
+/// les espaces MOI (documents, notifications) et SYSTÈME (connecteurs et leur fiche, réglages, autres systèmes) ;
+/// l'audit d'accessibilité d'Apple sur chaque vue, chaque page et la fiche ; la disposition large (iPad à
+/// l'horizontale, le rail des espaces). Des captures sont jointes au
 /// résultat : elles se comparent à celles de la console web vue connecté (relecture du design).
 @MainActor
 final class ParcoursUITests: XCTestCase {
@@ -49,10 +50,27 @@ final class ParcoursUITests: XCTestCase {
         add(c)
     }
 
-    /// Choisir une vue de la console (sur téléphone ; en disposition large, toutes sont visibles).
+    /// Choisir un espace (28.10 : ALFRED · MAISON · MOI · SYSTÈME) ; « pieces » et « environnement » : MAISON, puis
+    /// Pièces | Environnement sur téléphone (en disposition large, MAISON montre la roue et l'environnement).
     private func vue(_ app: XCUIApplication, _ nom: String) {
-        let onglet = bouton(app, "onglet-\(nom)")
-        if onglet.exists { onglet.tap() }
+        switch nom {
+        case "alfred", "moi", "systeme":
+            bouton(app, "espace-\(nom)").tap()
+        default:
+            bouton(app, "espace-maison").tap()
+            let segment = bouton(app, "vue-\(nom)")
+            if segment.waitForExistence(timeout: 2) { segment.tap() }
+        }
+    }
+
+    /// Faire défiler la page jusqu'à ce que l'élément soit à l'écran (25 essais au plus : au plus grand texte, les
+    /// quinze connecteurs passent avant les réglages).
+    private func defilerJusqua(_ app: XCUIApplication, _ e: XCUIElement) {
+        var n = 0
+        while !(e.exists && e.isHittable), n < 25 {
+            app.swipeUp()
+            n += 1
+        }
     }
 
     func testEcrireAAlfred() throws {
@@ -89,7 +107,7 @@ final class ParcoursUITests: XCTestCase {
         let atelier = bouton(app, "piece-Atelier")
         XCTAssertTrue(atelier.waitForExistence(timeout: 10))
         // ce qui bouge, s'il y a lieu : l'en-tête, la pièce, « Parler », les onglets (dans le message d'échec)
-        let reperes = ["reglages", "piece-Atelier", "parler", "onglet-pieces"].map { bouton(app, $0) }
+        let reperes = ["compte", "piece-Atelier", "parler", "espace-maison"].map { bouton(app, $0) }
         func positions() -> String {
             reperes.map { "\($0.identifier) \(Int($0.frame.minY))-\(Int($0.frame.maxY))" }.joined(separator: ", ")
         }
@@ -165,21 +183,22 @@ final class ParcoursUITests: XCTestCase {
     func testAccessibilite() throws {
         let app = lancer()
         attendrePret(app)
-        try auditerEcrans(app, ["Pièces", "Alfred", "Environnement", "Documents", "Notifications", "Réglages"])
+        try auditerEcrans(app, ["Pièces", "Alfred", "Environnement", "Moi", "Système", "Fiche"])
     }
 
-    /// Les fenêtres de l'en-tête, comme la console connectée : les documents déposés, les notifications (marquées lues
-    /// à l'ouverture), les autres systèmes, les réglages et l'état de la maison.
-    func testFenetresDeLEnTete() throws {
+    /// Les espaces MOI et SYSTÈME (28.10), comme la console connectée : les documents déposés, les notifications
+    /// (Notifications de l'en-tête y mène ; marquées lues à l'arrivée), les connecteurs et la fiche de l'un d'eux, les
+    /// réglages, les autres systèmes ; les pastilles d'état mènent aux connecteurs.
+    func testEspacesMoiEtSysteme() throws {
         let app = lancer()
         attendrePret(app)
-        let fermer = bouton(app, "fermerFenetre")
 
-        let documents = bouton(app, "documents")
-        XCTAssertTrue(documents.waitForExistence(timeout: 10))
+        let moi = bouton(app, "espace-moi")
+        XCTAssertTrue(moi.waitForExistence(timeout: 10))
         // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (le refus de la démo)
-        XCTAssertTrue(documents.label.contains("1 à traiter"), documents.label)
-        documents.tap()
+        XCTAssertTrue(moi.label.contains("1 document à traiter"), moi.label)
+        moi.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["page-moi"].waitForExistence(timeout: 5))
         // 23.10 (soir) : « À envoyer » vide, le bouton d'envoi désactivé, le refus de la démo dans « À revoir »
         XCTAssertTrue(element(app, contenant: "Aucun document à envoyer.").waitForExistence(timeout: 5))
         let envoyer = bouton(app, "envoyerPaperless")
@@ -194,38 +213,59 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(retirer.frame.height, 44, "cible de « Retirer »")
         XCTAssertGreaterThanOrEqual(retirer.frame.width, 44, "cible de « Retirer »")
         XCTAssertTrue(app.buttons["Réessayer Photo floue d’exemple"].exists)
-        capturer(app, "6-documents")
-        fermer.tap()
+        capturer(app, "6-moi-documents")
 
+        bouton(app, "espace-alfred").tap()
         let notifications = bouton(app, "notifications")
         XCTAssertTrue(notifications.waitForExistence(timeout: 10))
         XCTAssertTrue(notifications.label.contains("1 non lue"), notifications.label)
         notifications.tap()
-        XCTAssertTrue(element(app, contenant: "la lessive est terminée").waitForExistence(timeout: 5))
-        capturer(app, "7-notifications")
-        fermer.tap()
-        // lues à l'ouverture : le compteur disparaît
+        let lessive = element(app, contenant: "la lessive est terminée")
+        XCTAssertTrue(lessive.waitForExistence(timeout: 5))
+        XCTAssertTrue(bouton(app, "espace-moi").isSelected, "Notifications mène à MOI")
+        capturer(app, "7-moi-notifications")
+        // lues à l'arrivée dans MOI : le compteur disparaît
         let lues = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == %@", "Notifications"), object: notifications)
         XCTAssertEqual(XCTWaiter().wait(for: [lues], timeout: 20), .completed, "notifications non marquées lues")
 
-        bouton(app, "liens").tap()
-        XCTAssertTrue(element(app, contenant: "Paperless").waitForExistence(timeout: 5))
-        capturer(app, "8-autres-systemes")
-        // un toucher ailleurs referme la liste
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)).tap()
-        XCTAssertFalse(element(app, contenant: "Paperless").waitForExistence(timeout: 1))
+        bouton(app, "espace-systeme").tap()
+        XCTAssertTrue(app.descendants(matching: .any)["page-systeme"].waitForExistence(timeout: 5))
+        let ha = app.descendants(matching: .any)["connecteur-home-assistant"]
+        XCTAssertTrue(ha.waitForExistence(timeout: 10), "les connecteurs de la démo")
+        XCTAssertTrue(element(app, contenant: "Home Assistant").exists)
+        XCTAssertTrue(element(app, contenant: "En service").exists, "l'état en mots")
+        XCTAssertTrue(element(app, contenant: "À la demande").exists, "Claude : à la demande")
+        XCTAssertTrue(bouton(app, "ouvrir-home-assistant").exists, "« Ouvrir » selon le compte")
+        capturer(app, "8-connecteurs")
+        bouton(app, "details-home-assistant").tap()
+        XCTAssertTrue(app.descendants(matching: .any)["fiche"].waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, contenant: "Ce qu’Alfred en fait").exists)
+        XCTAssertTrue(element(app, contenant: "Surveillé par Uptime Kuma").exists)
+        XCTAssertTrue(bouton(app, "ficheHistorique").exists, "l'historique d'Uptime Kuma est dans la fiche")
+        capturer(app, "9-fiche")
+        bouton(app, "fermerFiche").tap()
+        XCTAssertTrue(app.descendants(matching: .any)["fiche"].waitForNonExistence(timeout: 5))
 
-        bouton(app, "reglages").tap()
-        XCTAssertTrue(element(app, contenant: "demo").waitForExistence(timeout: 5), "le modèle du pipeline")
-        XCTAssertTrue(element(app, contenant: "Tester le micro").exists)
-        capturer(app, "9-reglages")
-        fermer.tap()
+        let micro = element(app, contenant: "Tester le micro")
+        defilerJusqua(app, micro)
+        XCTAssertTrue(micro.exists, "les réglages dans SYSTÈME")
+        XCTAssertTrue(element(app, contenant: "demo").exists, "le modèle du pipeline")
+        capturer(app, "10-reglages")
+        let autres = element(app, contenant: "Autres systèmes")
+        defilerJusqua(app, autres)
+        XCTAssertTrue(autres.exists && element(app, contenant: "Paperless").exists, "les autres systèmes")
+        capturer(app, "11-autres-systemes")
 
+        // les pastilles d'état mènent aux connecteurs (plus à Uptime Kuma)
         vue(app, "environnement")
-        app.swipeUp()
-        XCTAssertTrue(app.descendants(matching: .any)["etatServices"].waitForExistence(timeout: 5))
-        capturer(app, "10-etat-des-services")
+        let pastilles = app.descendants(matching: .any)["etatServices"]
+        defilerJusqua(app, pastilles)
+        XCTAssertTrue(pastilles.waitForExistence(timeout: 5))
+        capturer(app, "12-etat-des-services")
+        pastilles.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["page-systeme"].waitForExistence(timeout: 5), "pastilles → SYSTÈME")
     }
 
     /// L'en-tête tient dans la largeur de l'écran : la marque dans la marge, puis chaque bouton entier, d'au moins
@@ -244,7 +284,8 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertTrue(marque.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(marque.frame.minX, 16 - 0.5, "marque hors de la marge : \(marque.frame)")
         var precedent = marque.frame
-        for id in ["documents", "notifications", "reglages", "liens", "compte"] {
+        // 28.10 : Documents, Réglages et les autres systèmes ont quitté l'en-tête (espaces MOI et SYSTÈME)
+        for id in ["notifications", "compte"] {
             let b = bouton(app, id)
             XCTAssertTrue(b.exists, id)
             let f = b.frame
@@ -263,9 +304,21 @@ final class ParcoursUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = lancer()
         attendrePret(app)
-        XCTAssertFalse(bouton(app, "onglet-pieces").exists, "pas d'onglets en disposition large")
+        // le rail des espaces à gauche, pas de Pièces | Environnement
+        let maison = bouton(app, "espace-maison")
+        XCTAssertTrue(maison.waitForExistence(timeout: 5))
+        XCTAssertLessThan(maison.frame.maxX, 100, "le rail à gauche : \(maison.frame)")
+        XCTAssertFalse(bouton(app, "vue-pieces").exists, "pas de Pièces | Environnement en disposition large")
         XCTAssertTrue(element(app, contenant: "Extérieur").exists)
+        XCTAssertTrue(element(app, contenant: "Assistant personnel").exists, "ALFRED : l'assistant")
         capturer(app, "ipad-1-large")
+        maison.tap()
+        let assistantReplie = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: element(app, contenant: "Assistant personnel"))
+        XCTAssertEqual(XCTWaiter().wait(for: [assistantReplie], timeout: 5), .completed, "MAISON : l'assistant replié")
+        XCTAssertTrue(element(app, contenant: "Extérieur").exists, "MAISON : l'environnement reste")
+        capturer(app, "ipad-1b-maison")
+        bouton(app, "espace-alfred").tap()
         bouton(app, "piece-Salon").tap()
         XCTAssertTrue(bouton(app, "actionPiece").waitForExistence(timeout: 5))
         capturer(app, "ipad-2-piece")
@@ -276,7 +329,9 @@ final class ParcoursUITests: XCTestCase {
             app, ["Large"], types: XCUIAccessibilityAuditType.all.subtracting([.dynamicType, .contrast]),
             sansElementEcarte: true)
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(bouton(app, "onglet-pieces").waitForExistence(timeout: 5), "onglets en disposition étroite")
+        let barre = bouton(app, "espace-maison")
+        XCTAssertTrue(barre.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(barre.frame.minY, app.frame.height * 0.8, "la barre du bas en disposition étroite")
         capturer(app, "ipad-3-portrait")
     }
 
@@ -335,8 +390,9 @@ final class ParcoursUITests: XCTestCase {
             app.swipeUp()
             capturerEtVerifier("grand-texte-4-environnement-suite")
         }
-        bouton(app, "reglages").tap()
+        vue(app, "systeme")
         let modele = element(app, contenant: "Modèle")
+        defilerJusqua(app, modele)
         XCTAssertTrue(modele.waitForExistence(timeout: 5))
         h["Modèle"] = modele.frame.height
         if captures {
@@ -348,9 +404,7 @@ final class ParcoursUITests: XCTestCase {
         }
         // 23.10 : le champ « Ajouter une étiquette » des Documents — l'audit d'Apple y prédit un texte coupé aux grandes
         // tailles ; sa hauteur MESURÉE doit grandir avec le texte (sinon l'audit avait raison), capture à l'appui
-        bouton(app, "fermerFenetre").tap()
-        vue(app, "pieces")
-        bouton(app, "documents").tap()
+        vue(app, "moi")
         let etiquette = app.textFields["etiquette"]
         XCTAssertTrue(etiquette.waitForExistence(timeout: 5))
         h["etiquette"] = etiquette.frame.height
@@ -452,15 +506,22 @@ final class ParcoursUITests: XCTestCase {
         var problemes: [String] = []
         var ecartes: [String] = []
         for ecran in ecrans {
-            // une fenêtre restée ouverte (l'écran d'avant) se ferme d'abord
-            if bouton(app, "fermerFenetre").exists { bouton(app, "fermerFenetre").tap() }
+            // la fiche restée ouverte (l'écran d'avant) se ferme d'abord
+            if bouton(app, "fermerFiche").exists { bouton(app, "fermerFiche").tap() }
             switch ecran {
             case "Alfred": vue(app, "alfred")
             case "Environnement": vue(app, "environnement")
-            case "Documents", "Notifications", "Réglages":
-                vue(app, "pieces")
-                bouton(app, ["Documents": "documents", "Notifications": "notifications"][ecran] ?? "reglages").tap()
-                XCTAssertTrue(bouton(app, "fermerFenetre").waitForExistence(timeout: 5))
+            case "Moi":
+                vue(app, "moi")
+                XCTAssertTrue(app.descendants(matching: .any)["page-moi"].waitForExistence(timeout: 5))
+            case "Système":
+                vue(app, "systeme")
+                XCTAssertTrue(
+                    app.descendants(matching: .any)["connecteur-home-assistant"].waitForExistence(timeout: 10))
+            case "Fiche":
+                vue(app, "systeme")
+                bouton(app, "details-home-assistant").tap()
+                XCTAssertTrue(app.descendants(matching: .any)["fiche"].waitForExistence(timeout: 5))
             default: vue(app, "pieces")
             }
             // l'audit relève, le tri vient après (une capture ou une requête pendant l'audit le ralentit)
