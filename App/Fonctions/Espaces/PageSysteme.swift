@@ -206,7 +206,8 @@ struct EtatConnecteur: View {
                 .tracking(0.7)
                 .textCase(.uppercase)
                 .foregroundStyle(couleurEtat(statut))
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+                .minimumScaleFactor(0.5)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(texte)
@@ -237,7 +238,8 @@ private struct EtiquettesConnecteur: View {
             .font(.caption2.weight(.semibold).monospaced())
             .tracking(1)
             .textCase(.uppercase)
-            .lineLimit(1)
+            .lineLimit(2)
+            .minimumScaleFactor(0.5)
             .foregroundStyle(nuage ? Color(.sodium) : Color(.texteSecondaire))
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -346,12 +348,16 @@ private struct CarteConnecteur: View {
                 HStack(alignment: .top, spacing: 14) {
                     LogoConnecteur(icone: connecteur.icone, statut: connecteur.etat.statut, cadre: 48)
                     VStack(alignment: .leading, spacing: 6) {
-                        nom
-                        phrase(.leading)
-                        EtatConnecteur(
-                            statut: connecteur.etat.statut, mot: connecteur.etat.mot, depuis: connecteur.etat.dateDepuis
-                        )
-                        EtiquettesConnecteur(connecteur: connecteur, alignement: .leading)
+                        // le nom, la phrase, l'état et les étiquettes : un seul élément pour VoiceOver (lu d'un trait)
+                        VStack(alignment: .leading, spacing: 6) {
+                            nom
+                            phrase(.leading)
+                            EtatConnecteur(
+                                statut: connecteur.etat.statut, mot: connecteur.etat.mot,
+                                depuis: connecteur.etat.dateDepuis)
+                            EtiquettesConnecteur(connecteur: connecteur, alignement: .leading)
+                        }
+                        .accessibilityElement(children: .combine)
                         actions.padding(.top, 2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -362,12 +368,18 @@ private struct CarteConnecteur: View {
             } else {
                 VStack(spacing: 9) {
                     LogoConnecteur(icone: connecteur.icone, statut: connecteur.etat.statut)
-                    nom.padding(.top, 2)
-                    phrase(.center)
-                    Spacer(minLength: 0)
-                    EtatConnecteur(
-                        statut: connecteur.etat.statut, mot: connecteur.etat.mot, depuis: connecteur.etat.dateDepuis)
-                    EtiquettesConnecteur(connecteur: connecteur, alignement: .center)
+                    // le nom, la phrase, l'état et les étiquettes : un seul élément pour VoiceOver (lu d'un trait)
+                    VStack(spacing: 9) {
+                        nom.padding(.top, 2)
+                        phrase(.center)
+                        Spacer(minLength: 0)
+                        EtatConnecteur(
+                            statut: connecteur.etat.statut, mot: connecteur.etat.mot,
+                            depuis: connecteur.etat.dateDepuis)
+                        EtiquettesConnecteur(connecteur: connecteur, alignement: .center)
+                    }
+                    .frame(maxHeight: .infinity)
+                    .accessibilityElement(children: .combine)
                     actions.padding(.top, 4)
                 }
                 .multilineTextAlignment(.center)
@@ -536,11 +548,13 @@ struct FicheConnecteur: View {
                     .font(.title2.weight(.bold))
                     .foregroundStyle(Color(.glace))
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityFocused($focusNom)
                 EtatConnecteur(
                     statut: connecteur.etat.statut, mot: connecteur.etat.mot, depuis: connecteur.etat.dateDepuis)
             }
+            // le nom et l'état : un seul élément, un titre ; VoiceOver y arrive à l'ouverture
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($focusNom)
             Spacer(minLength: 0)
             Button(action: fermer) {
                 Image(systemName: "xmark")
@@ -563,6 +577,8 @@ struct FicheConnecteur: View {
             .tracking(1.4)
             .textCase(.uppercase)
             .foregroundStyle(Color(.champagne))
+            .lineLimit(2)
+            .minimumScaleFactor(0.5)
             .accessibilityAddTraits(.isHeader)
             .padding(.top, 20)
             .padding(.bottom, 6)

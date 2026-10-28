@@ -193,6 +193,11 @@ final class ParcoursUITests: XCTestCase {
         let app = lancer()
         attendrePret(app)
 
+        // la notification non lue, AVANT d'entrer dans MOI (y arriver la marque lue, comme la console)
+        let notifications = bouton(app, "notifications")
+        XCTAssertTrue(notifications.waitForExistence(timeout: 10))
+        XCTAssertTrue(notifications.label.contains("1 non lue"), notifications.label)
+
         let moi = bouton(app, "espace-moi")
         XCTAssertTrue(moi.waitForExistence(timeout: 10))
         // 23.10 (la boîte d'arrivée) : la pastille ne compte que ce qui demande une action (le refus de la démo)
@@ -215,13 +220,9 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Réessayer Photo floue d’exemple"].exists)
         capturer(app, "6-moi-documents")
 
-        bouton(app, "espace-alfred").tap()
-        let notifications = bouton(app, "notifications")
-        XCTAssertTrue(notifications.waitForExistence(timeout: 10))
-        XCTAssertTrue(notifications.label.contains("1 non lue"), notifications.label)
+        // Notifications (en-tête) : MOI, la liste en vue
         notifications.tap()
-        let lessive = element(app, contenant: "la lessive est terminée")
-        XCTAssertTrue(lessive.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, contenant: "la lessive est terminée").waitForExistence(timeout: 5))
         XCTAssertTrue(bouton(app, "espace-moi").isSelected, "Notifications mène à MOI")
         capturer(app, "7-moi-notifications")
         // lues à l'arrivée dans MOI : le compteur disparaît

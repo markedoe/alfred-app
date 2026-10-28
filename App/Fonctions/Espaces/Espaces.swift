@@ -185,8 +185,6 @@ private func libelleEspace(_ e: Espace, _ alfred: Alfred) -> String {
 /// (pictogramme et mot en capitales), l'actif en champagne sur fond bleu, souligné à gauche d'un trait du faisceau.
 struct RailEspaces: View {
     @Environment(Alfred.self) private var alfred
-    /// Le mot sous le pictogramme : 10 pt comme la console, à l'échelle du texte (plafonnée par la barre).
-    @ScaledMetric(relativeTo: .caption2) private var libelle: CGFloat = 10
     @Bindable var navigation: NavigationConsole
 
     var body: some View {
@@ -201,11 +199,9 @@ struct RailEspaces: View {
                             .foregroundStyle(actif ? Color(.glace) : Color(.texteSecondaire))
                             .shadow(color: actif ? Color(.faisceau).opacity(0.4) : .clear, radius: 3)
                         Text(e.titre)
-                            .font(.system(size: libelle, weight: .heavy))
+                            .font(.caption2.weight(.heavy))
                             .tracking(1.4)
                             .textCase(.uppercase)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
                             .foregroundStyle(actif ? Color(.champagne) : Color(.texteSecondaire))
                     }
                     .frame(maxWidth: .infinity, minHeight: 66)
@@ -252,8 +248,6 @@ struct RailEspaces: View {
 /// champagne, souligné en haut du faisceau (comme les trois vues d'avant).
 struct BarreEspaces: View {
     @Environment(Alfred.self) private var alfred
-    /// Le mot sous le pictogramme : 10 pt comme la console, à l'échelle du texte (plafonnée par la barre).
-    @ScaledMetric(relativeTo: .caption2) private var libelle: CGFloat = 10
     @Bindable var navigation: NavigationConsole
 
     var body: some View {
@@ -267,11 +261,9 @@ struct BarreEspaces: View {
                         IconeEspaceVue(espace: e)
                             .foregroundStyle(actif ? Color(.glace) : Color(.texteSecondaire))
                         Text(e.titre)
-                            .font(.system(size: libelle, weight: .heavy))
+                            .font(.caption2.weight(.heavy))
                             .tracking(1.4)
                             .textCase(.uppercase)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
                             .foregroundStyle(actif ? Color(.champagne) : Color(.texteSecondaire))
                     }
                     .frame(maxWidth: .infinity, minHeight: 56)
