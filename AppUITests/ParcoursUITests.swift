@@ -314,6 +314,20 @@ final class ParcoursUITests: XCTestCase {
         XCTAssertTrue(element(app, contenant: "Assistant personnel").exists, "ALFRED : l'assistant")
         capturer(app, "ipad-1-large")
         maison.tap()
+        // 28.10 (CI) : le toucher sur MAISON du rail n'avait rien changé — si l'espace ne bascule pas, l'arbre des
+        // éléments (cadres compris) est joint, puis un toucher au centre du cadre, par coordonnées, est essayé
+        let choisi = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: maison)
+        if XCTWaiter().wait(for: [choisi], timeout: 3) != .completed {
+            let arbre = XCTAttachment(string: app.debugDescription)
+            arbre.name = "ipad-arbre-apres-maison"
+            arbre.lifetime = .keepAlways
+            add(arbre)
+            capturer(app, "ipad-1a-maison-sans-effet")
+            maison.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertEqual(
+                XCTWaiter().wait(for: [choisi], timeout: 3), .completed,
+                "MAISON : le toucher ne bascule pas (hittable : \(maison.isHittable), cadre : \(maison.frame))")
+        }
         let assistantReplie = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: element(app, contenant: "Assistant personnel"))
         XCTAssertEqual(XCTWaiter().wait(for: [assistantReplie], timeout: 5), .completed, "MAISON : l'assistant replié")
