@@ -127,4 +127,7 @@ swift test --package-path Paquets/AlfredKit
 
 Voir [`SECURITY.md`](SECURITY.md).
 
-**Licence :** aucune. Le code est visible, tous droits réservés.
+**Licence :** [FSL-1.1-ALv2](LICENSE.md) (*Functional Source License*, https://fsl.software). Lire, utiliser, modifier
+et redistribuer le code est permis, sauf pour en faire un produit ou un service commercial concurrent ; chaque version
+devient Apache 2.0 deux ans après sa publication. Les tracés des logos de marques de la page Connecteurs viennent de
+[Simple Icons](https://simpleicons.org) (CC0).
