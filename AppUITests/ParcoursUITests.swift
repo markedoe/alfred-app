@@ -65,10 +65,16 @@ final class ParcoursUITests: XCTestCase {
 
     /// Faire défiler la page jusqu'à ce que l'élément soit à l'écran (25 essais au plus : au plus grand texte, les
     /// quinze connecteurs passent avant les réglages).
+    /// 29.10 : un élément déjà passé au-dessus (sous l'en-tête, existant mais pas touchable) fait revenir en arrière,
+    /// lentement, au lieu de s'éloigner encore.
     private func defilerJusqua(_ app: XCUIApplication, _ e: XCUIElement) {
         var n = 0
         while !(e.exists && e.isHittable), n < 25 {
-            app.swipeUp()
+            if e.exists, e.frame.height > 0, e.frame.midY < app.frame.height * 0.35 {
+                app.swipeDown(velocity: .slow)
+            } else {
+                app.swipeUp(velocity: n < 10 ? .default : .slow)
+            }
             n += 1
         }
     }
