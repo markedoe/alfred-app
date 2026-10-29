@@ -452,6 +452,55 @@ final class ParcoursUITests: XCTestCase {
             fautes.isEmpty, "\(ecran) : sort de l'écran (\(Int(largeur)) pt) : " + fautes.joined(separator: " ; "))
     }
 
+    /// La fiche de CHAQUE connecteur (29.10, retour d’essai sur iPhone : « plus grand que l'écran, impossible de
+    /// refermer ») : à la taille normale et au plus grand texte, rien ne sort par le côté, la croix reste touchable une
+    /// fois le corps défilé jusqu'en bas, et la fiche se ferme ; le voile autour la ferme aussi.
+    func testFichesConnecteurs() throws {
+        let ids = [
+            "home-assistant", "alertes", "modele", "ecoute", "voix", "garde", "memoire", "documents", "emails",
+            "agenda", "web", "hermes", "claude", "kuma", "nuit",
+        ]
+        for taille in [nil, "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = lancer(tailleTexte: taille)
+            attendrePret(app)
+            vue(app, "systeme")
+            let ecran = app.frame
+            for (rang, id) in ids.enumerated() {
+                let details = bouton(app, "details-\(id)")
+                defilerJusqua(app, details)
+                XCTAssertTrue(details.isHittable, "\(id) : « Détails » introuvable")
+                details.tap()
+                let fiche = app.descendants(matching: .any)["fiche"]
+                XCTAssertTrue(fiche.waitForExistence(timeout: 5), "\(id) : la fiche ne s'ouvre pas")
+                let nom = "fiche-\(id)\(taille == nil ? "" : "-grand-texte")"
+                horsEcran(app, nom)
+                let carte = app.descendants(matching: .any)["ficheCarte"]
+                XCTAssertLessThanOrEqual(carte.frame.maxX, ecran.maxX + 0.5, "\(nom) : plus large que l'écran")
+                let corps = app.scrollViews["ficheCorps"]
+                if corps.exists {
+                    for _ in 0..<12 { corps.swipeUp() }
+                }
+                let croix = bouton(app, "fermerFiche")
+                XCTAssertTrue(croix.isHittable, "\(nom) : la croix n'est plus touchable après avoir défilé")
+                XCTAssertGreaterThanOrEqual(
+                    croix.frame.minY, app.windows.firstMatch.frame.minY, "\(nom) : croix hors de l'écran")
+                if rang == 0 || id == "hermes" { capturer(app, nom) }
+                if rang == 0 {
+                    // le voile, à gauche de la fiche, au milieu de l'écran
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0)).withOffset(
+                        CGVector(dx: 4, dy: ecran.height / 2)
+                    ).tap()
+                    XCTAssertTrue(
+                        fiche.waitForNonExistence(timeout: 5), "\(nom) : toucher le voile ne ferme pas la fiche")
+                } else {
+                    croix.tap()
+                    XCTAssertTrue(fiche.waitForNonExistence(timeout: 5), "\(nom) : la croix ne ferme pas la fiche")
+                }
+            }
+            app.terminate()
+        }
+    }
+
     /// L'accueil (sans la démo) : le motif d'une déconnexion se voit sans défiler, sous la marque, et rien ne sort de
     /// l'écran, à la taille normale comme en très grand texte (revue du 18.10, point 18 ; du 21.10, ATTENTION 9).
     func testAccueil() throws {

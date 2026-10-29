@@ -477,67 +477,84 @@ struct FicheConnecteur: View {
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
                 .onTapGesture(perform: fermer)
-            GeometryReader { geo in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        tete
-                        Text(connecteur.phrase)
-                            .font(.subheadline)
-                            .foregroundStyle(Color(.texteSecondaire))
-                            .lineSpacing(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 14)
-                        EtiquettesConnecteur(connecteur: connecteur, alignement: .leading)
-                            .padding(.top, 12)
-                        if !connecteur.etat.services.isEmpty {
-                            sousTitre("Surveillé par Uptime Kuma")
-                            VStack(spacing: 0) {
-                                ForEach(connecteur.etat.services) { s in
-                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                        Text(s.nom).font(.subheadline).foregroundStyle(Color(.texte))
-                                        Spacer(minLength: 0)
-                                        EtatConnecteur(statut: s.statut, mot: s.mot, depuis: s.dateDepuis)
-                                    }
-                                    .padding(.vertical, 8)
-                                    .overlay(alignment: .bottom) { Rectangle().fill(Color(.trait)).frame(height: 1) }
-                                    .accessibilityElement(children: .combine)
-                                }
-                            }
-                        }
-                        bloc("Ce qu’Alfred en fait", connecteur.fiche.fait)
-                        bloc("Jamais", connecteur.fiche.jamais)
-                        bloc("Où vont les données", connecteur.fiche.donnees)
-                        bloc("Qui y a accès", connecteur.fiche.acces)
-                        if !connecteur.fiche.essayer.isEmpty {
-                            sousTitre("À essayer")
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(connecteur.fiche.essayer, id: \.self) { e in
-                                    Text("« \(e) »").font(.subheadline).foregroundStyle(Color(.glace))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                        liens.padding(.top, 22)
-                    }
-                    .padding(24)
-                    .background {
-                        RoundedRectangle(cornerRadius: 14).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
-                            .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
-                    }
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.acier), lineWidth: 2))
-                    .frame(maxWidth: 560)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 16)
-                    .frame(minWidth: geo.size.width, minHeight: geo.size.height)
+            // 29.10 (retour d’essai sur iPhone : « plus grand que l'écran, impossible de refermer ») : la tête (et sa
+            // croix) reste FIXE, seul le corps défile ; la fiche tient dans la zone sûre (ni sous la barre d'état ni sous
+            // l'indicateur d'accueil) et laisse le voile autour, qui ferme d'un toucher comme dans la console.
+            VStack(alignment: .leading, spacing: 0) {
+                tete
+                    .padding([.horizontal, .top], 24)
+                    .padding(.bottom, 4)
+                ViewThatFits(in: .vertical) {
+                    corps
+                    ScrollView { corps }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .accessibilityIdentifier("ficheCorps")
                 }
-                .scrollBounceBehavior(.basedOnSize)
             }
+            .background {
+                RoundedRectangle(cornerRadius: 14).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
+                    .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(.acier), lineWidth: 2))
+            .contentShape(.rect(cornerRadius: 14))
+            .frame(maxWidth: 560)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("ficheCarte")
         }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .accessibilityAction(.escape, fermer)
         .accessibilityIdentifier("fiche")
         .onAppear { focusNom = true }
+    }
+
+    /// Tout ce qui suit la tête : défile si la fiche dépasse l'écran.
+    private var corps: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(connecteur.phrase)
+                .font(.subheadline)
+                .foregroundStyle(Color(.texteSecondaire))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+            EtiquettesConnecteur(connecteur: connecteur, alignement: .leading)
+                .padding(.top, 12)
+            if !connecteur.etat.services.isEmpty {
+                sousTitre("Surveillé par Uptime Kuma")
+                VStack(spacing: 0) {
+                    ForEach(connecteur.etat.services) { s in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(s.nom).font(.subheadline).foregroundStyle(Color(.texte))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            EtatConnecteur(statut: s.statut, mot: s.mot, depuis: s.dateDepuis)
+                        }
+                        .padding(.vertical, 8)
+                        .overlay(alignment: .bottom) { Rectangle().fill(Color(.trait)).frame(height: 1) }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            bloc("Ce qu’Alfred en fait", connecteur.fiche.fait)
+            bloc("Jamais", connecteur.fiche.jamais)
+            bloc("Où vont les données", connecteur.fiche.donnees)
+            bloc("Qui y a accès", connecteur.fiche.acces)
+            if !connecteur.fiche.essayer.isEmpty {
+                sousTitre("À essayer")
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(connecteur.fiche.essayer, id: \.self) { e in
+                        Text("« \(e) »").font(.subheadline).foregroundStyle(Color(.glace))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            liens.padding(.top, 22)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var tete: some View {
@@ -596,14 +613,22 @@ struct FicheConnecteur: View {
         }
     }
 
+    /// Côte à côte s'ils tiennent, l'un sous l'autre sinon (iPhone : « Ouvrir Home Assistant » + « Historique (Uptime
+    /// Kuma) » ≈ 460 pt pour 318 pt de fiche).
     private var liens: some View {
-        HStack(spacing: 8) {
-            if let l = connecteur.lien {
-                lienSysteme("Ouvrir \(connecteur.nom)", l, identifiant: "ficheOuvrir")
-            }
-            if let h = historique, !connecteur.etat.services.isEmpty {
-                lienSysteme("Historique (Uptime Kuma)", h, identifiant: "ficheHistorique")
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { boutonsLiens }
+            VStack(alignment: .leading, spacing: 8) { boutonsLiens }
+        }
+    }
+
+    @ViewBuilder
+    private var boutonsLiens: some View {
+        if let l = connecteur.lien {
+            lienSysteme("Ouvrir \(connecteur.nom)", l, identifiant: "ficheOuvrir")
+        }
+        if let h = historique, !connecteur.etat.services.isEmpty {
+            lienSysteme("Historique (Uptime Kuma)", h, identifiant: "ficheHistorique")
         }
     }
 
