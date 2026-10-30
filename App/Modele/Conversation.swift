@@ -8,9 +8,10 @@ import Observation
 /// - **conversation continue** : un toucher ouvre le micro ; chaque phrase est un tour ; après la réponse, Alfred
 ///   réécoute ; la conversation se ferme d'un toucher, ou après 90 s sans parole ;
 /// - **micro coupé** (24.10 ; 25.10, retour d’essai : « vraiment couper le micro, instantanément, comme le bouton micro
-///   de Claude ») : au toucher, plus RIEN ne part ; une phrase en cours est ABANDONNÉE (la maison annule le tour : rien
-///   n’est compris ni fait) ; le micro d’iOS s’éteint aussitôt — ou dès la fin de la voix d’Alfred s’il parle (sa voix
-///   passe par le même moteur) ; sa réponse à une question déjà posée arrive quand même ; la conversation reste ouverte
+///   de Claude » ; 30.10 : « si je coupe le micro, il ne fait pas la partie analyse ») : au toucher, plus RIEN ne part
+///   ensuite ; une phrase en cours est ENVOYÉE telle quelle (fin de phrase : Alfred la comprend et répond) ; le micro
+///   d’iOS s’éteint aussitôt — ou dès la fin de la voix d’Alfred s’il parle ou va répondre (sa voix passe par le même
+///   moteur) ; sa réponse à une question déjà posée arrive quand même ; la conversation reste ouverte
 ///   (même fil), 10 min au plus ; rouvert, le micro se rallume et Alfred réécoute. Avant : la phrase commencée continuait,
 ///   la pièce qui parlait la tenait ouverte (Alfred entendait tout), puis le tour échouait au bout de 90 s et fermait la
 ///   conversation (« il ne réécoute pas ») ;
@@ -162,6 +163,8 @@ final class Conversation {
     @ObservationIgnored private(set) var niveauMicro: Float = 0
     @ObservationIgnored private(set) var voix: any MoteurVoix
     @ObservationIgnored var client: ClientRelais?
+    /// Les étapes de la voix notées par le relais (30.10) ; nil dans la démo et les tests.
+    @ObservationIgnored var diagnostic: DiagnosticVoix?
 
     private let reglages: UserDefaults
     /// Le fil de HA de la conversation en cours (nil : un fil neuf au prochain tour).
@@ -292,10 +295,14 @@ final class Conversation {
         microCoupe.toggle()
         if microCoupe {
             niveauMicro = 0
-            if tourOuvert {  // la phrase en cours est abandonnée : la maison annule le tour, rien n'est compris ni fait
+            // 30.10 (retour d'essai : « si je coupe le micro, il ne fait pas la partie analyse ») : la phrase en cours est
+            // ENVOYÉE, comme le bouton micro de Claude garde ce qui a été dicté — Alfred la comprend et répond, puis le
+            // micro reste coupé (25.10 → 30.10 : elle était abandonnée, rien n'était compris)
+            if tourOuvert {
                 tourOuvert = false
+                phase = .reflexion
                 let client = client
-                Task { await client?.abandonnerParole() }
+                Task { await client?.finParole() }
             }
             if phase == .ecoute { eteindreMicro() }  // sinon dès la fin de la voix d'Alfred (reecouter)
         } else {
@@ -340,6 +347,8 @@ final class Conversation {
         for decision in decisions {
             switch decision {
             case .attaque:
+                // le micro a pu être coupé pendant l'envoi du paquet précédent : aucune phrase ne s'ouvre
+                guard !microCoupe else { return }
                 minuterieSilence?.cancel()
                 guard await client.parler(conversation: conversationId, amorce: amorce.prendre()) else {
                     await aviserRefus(client)
@@ -349,6 +358,11 @@ final class Conversation {
                 // la conversation a pu se fermer pendant l'envoi (toucher, app cachée) : la phrase se clôt aussitôt
                 guard enConversation else {
                     await client.finParole()
+                    return
+                }
+                // micro coupé pendant l'ouverture (avant le premier mot envoyé) : la maison annule ce tour vide
+                guard !microCoupe else {
+                    await client.abandonnerParole()
                     return
                 }
                 tourOuvert = true
@@ -617,7 +631,11 @@ final class Conversation {
                 annoncer(messages.first { $0.id == messageAlfred }?.texte ?? fin.texte)
             }
         case .voix(let chemin):
-            guard tourVocal || lireReponsesEcrites else { return }
+            let lue = tourVocal || lireReponsesEcrites
+            diagnostic?.noter(
+                "annoncee",
+                ["lue": lue ? "oui" : "non", "phase": "\(phase)", "micro_coupe": microCoupe ? "oui" : "non"])
+            guard lue else { return }
             voixEnCours = true
             phase = .reponse
             let id = UUID()
@@ -628,7 +646,7 @@ final class Conversation {
                 guard self.lectureEnCours == id else { return }
                 self.voixFinie()
             }
-        case .abandonne:  // micro coupé pendant une phrase : rien n'a été compris ni fait
+        case .abandonne:  // micro coupé à l'ouverture d'une phrase : rien n'a été compris ni fait
             retirerReponseVide()
             if enConversation, phase != .ecoute { reecouter(marge: 0) }
         case .rienSaisi:

@@ -29,6 +29,16 @@ final class LecteurVoix: @unchecked Sendable {
     private var convertisseur: AVAudioConverter?
     private var programmes = 0
     private var enLecture = false
+    /// Ce que la dernière lecture a fait (30.10, diagnostic de la voix) : octets reçus, tampons joués, et si elle a pu
+    /// démarrer (le moteur du micro arrêté la rend muette sans erreur).
+    struct Bilan: Sendable {
+        var octets = 0
+        var programmes = 0
+        var joues = 0
+        var demarree = false
+        var moteurArrete = false
+    }
+    private var bilan = Bilan()
 
     /// Son moteur (pour reconnaître son arrêt par un changement de matériel).
     var moteurAudio: AVAudioEngine { moteur }
@@ -45,12 +55,15 @@ final class LecteurVoix: @unchecked Sendable {
 
     /// Lit un flux audio jusqu'au bout. L'annulation de la tâche l'arrête net (et lève `CancellationError`).
     /// `type` : l'indice du format (`kAudioFileMP3Type`, `kAudioFileWAVEType`…), d'après l'extension du chemin.
-    func lire<S: AsyncSequence>(_ octets: S, type: AudioFileTypeID) async throws where S.Element == UInt8 {
+    @discardableResult
+    func lire<S: AsyncSequence>(_ octets: S, type: AudioFileTypeID) async throws -> Bilan where S.Element == UInt8 {
+        bilan = Bilan()
         try ouvrir(type: type)
         defer { fermer() }
         var morceau: [UInt8] = []
         morceau.reserveCapacity(4096)
         for try await o in octets {
+            bilan.octets += 1
             morceau.append(o)
             if morceau.count >= 4096 {
                 try Task.checkCancellation()
@@ -64,6 +77,9 @@ final class LecteurVoix: @unchecked Sendable {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(20))
         }
+        bilan.programmes = programmes
+        bilan.joues = joues.withLock { $0 }
+        return bilan
     }
 
     static func type(chemin: String) -> AudioFileTypeID {
@@ -181,7 +197,10 @@ final class LecteurVoix: @unchecked Sendable {
         do {
             // le moteur du micro n'est démarré que par la capture : arrêté (micro fermé, matériel changé), la voix ne
             // le relance pas (son entrée garde l'ancien format)
-            if !moteur.isRunning, !possedeMoteur { return }
+            if !moteur.isRunning, !possedeMoteur {
+                bilan.moteurArrete = true
+                return
+            }
             installerMesure()
             if !moteur.isRunning {
                 moteur.prepare()
@@ -189,6 +208,7 @@ final class LecteurVoix: @unchecked Sendable {
             }
             joueur.play()
             enLecture = true
+            bilan.demarree = true
         } catch {
             enLecture = false
         }

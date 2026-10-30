@@ -17,6 +17,7 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
     private var _connecte = true
     private var _deconnexions = 0
     private var _avantStructure: (@Sendable () async -> Void)?
+    private var _repondreALaVoix = false
 
     init(etats: ValeurJSON = []) {
         self.etats = etats
@@ -34,6 +35,12 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
         set { verrou.withLock { _connecte = newValue } }
     }
     var deconnexions: Int { verrou.withLock { _deconnexions } }
+    /// 30.10 : les liaisons ouvertes ENSUITE ouvrent le canal du son d'un tour à la voix (run-start) et y répondent à la
+    /// fin de la phrase (marqueur d'un octet) ; sinon le tour reste en vol.
+    var repondreALaVoix: Bool {
+        get { verrou.withLock { _repondreALaVoix } }
+        set { verrou.withLock { _repondreALaVoix = newValue } }
+    }
     /// Attendue avant de répondre à `/maison/structure` : un test y retient la synchronisation.
     var avantStructure: (@Sendable () async -> Void)? {
         get { verrou.withLock { _avantStructure } }
@@ -41,7 +48,7 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
     }
 
     func ouvrir() async throws -> any Liaison {
-        let l = LiaisonDeTest(etats: etats, refuser: refuserTours)
+        let l = LiaisonDeTest(etats: etats, refuser: refuserTours, repondreALaVoix: repondreALaVoix)
         verrou.withLock { _liaisons.append(l) }
         await l.pousser(["type": "ready", "ha_version": "test"])
         return l
@@ -70,6 +77,13 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
         return tous
     }
 
+    /// Les fins de phrase reçues (marqueur d'un octet), liaison après liaison.
+    func finsDeParole() async -> Int {
+        var n = 0
+        for l in liaisons { n += await l.finsDeParole }
+        return n
+    }
+
     /// Les tours dont l'app s'est désabonnée (micro coupé pendant une phrase : la maison annule le tour).
     func desabonnements() async -> [Int] {
         var tous: [Int] = []
@@ -92,14 +106,27 @@ actor LiaisonDeTest: Liaison {
     private var fermee = false
     private(set) var tours: [TourDeTest] = []
     private(set) var desabonnements: [Int] = []
+    private(set) var finsDeParole = 0
+    private let repondreALaVoix: Bool
+    private var tourALaVoix: ValeurJSON?
 
-    init(etats: ValeurJSON, refuser: Bool) {
+    init(etats: ValeurJSON, refuser: Bool, repondreALaVoix: Bool = false) {
         self.etats = etats
         self.refuser = refuser
+        self.repondreALaVoix = repondreALaVoix
     }
 
     func envoyer(_ trame: Trame) async throws {
         if fermee { throw ErreurRelais.lienCoupe }
+        if case .binaire(let d) = trame {
+            // la fin de la phrase : le marqueur seul (le numéro du canal)
+            if d.count == 1, let id = tourALaVoix {
+                finsDeParole += 1
+                tourALaVoix = nil
+                repondre(id, dejaOuvert: true)
+            }
+            return
+        }
         guard case .texte(let t) = trame, let m = ValeurJSON.lire(t), let id = m["id"] else { return }
         switch m["type"]?.texte {
         case "get_states":
@@ -123,6 +150,13 @@ actor LiaisonDeTest: Liaison {
                 ])
             } else if !voix {
                 repondre(id)
+            } else if repondreALaVoix {
+                tourALaVoix = id
+                pousser(["id": id, "type": "result", "success": true, "result": .nul])
+                pousser(
+                    evenement(
+                        id, "run-start",
+                        ["conversation_id": .texte(RelaisDeTest.fil), "runner_data": ["stt_binary_handler_id": 1]]))
             }
         // à la voix : le tour reste en vol, comme quand la personne parle encore
         default:
@@ -134,9 +168,13 @@ actor LiaisonDeTest: Liaison {
         ["id": id, "type": "event", "event": ["type": .texte(type), "data": data]]
     }
 
-    private func repondre(_ id: ValeurJSON) {
-        pousser(["id": id, "type": "result", "success": true, "result": .nul])
-        pousser(evenement(id, "run-start", ["conversation_id": .texte(RelaisDeTest.fil), "runner_data": [:]]))
+    private func repondre(_ id: ValeurJSON, dejaOuvert: Bool = false) {
+        if dejaOuvert {
+            pousser(evenement(id, "stt-end", ["stt_output": ["text": "Quelle heure est-il"]]))
+        } else {
+            pousser(["id": id, "type": "result", "success": true, "result": .nul])
+            pousser(evenement(id, "run-start", ["conversation_id": .texte(RelaisDeTest.fil), "runner_data": [:]]))
+        }
         pousser(
             evenement(
                 id, "intent-end",

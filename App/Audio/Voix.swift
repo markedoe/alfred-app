@@ -272,13 +272,27 @@ final class VoixSysteme: MoteurVoix {
             try? AVAudioSession.sharedInstance().setActive(true)
         }
         let acces = self.acces
+        let diagnostic = DiagnosticVoix(acces: acces)
+        let moteur = micOuvert ? (capture.moteur.isRunning ? "micro_en_marche" : "micro_arrete") : "a_part"
+        diagnostic.noter("demandee", ["moteur": moteur])
+        let debut = ContinuousClock.now
         let tache = Task.detached(priority: .userInitiated) {
             do {
-                try await lecteur.lire(try await acces.flux(chemin), type: LecteurVoix.type(chemin: chemin))
+                let b = try await lecteur.lire(try await acces.flux(chemin), type: LecteurVoix.type(chemin: chemin))
+                let duree = (ContinuousClock.now - debut).components.seconds
+                diagnostic.noter(
+                    "finie",
+                    [
+                        "octets": "\(b.octets)", "tampons": "\(b.programmes)", "joues": "\(b.joues)",
+                        "demarree": b.demarree ? "oui" : "non", "moteur_arrete": b.moteurArrete ? "oui" : "non",
+                        "duree_s": "\(duree)",
+                    ])
             } catch is CancellationError {
+                diagnostic.noter("interrompue")
             } catch {
                 Logger(subsystem: "io.github.markedoe.alfred", category: "voix")
                     .error("voix illisible : \(error.localizedDescription, privacy: .public)")
+                diagnostic.noter("erreur", ["erreur": String(error.localizedDescription.prefix(160))])
             }
         }
         lecture = tache

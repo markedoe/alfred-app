@@ -167,6 +167,8 @@ final class Alfred {
         self.annexes = annexes
         if let voix { conversation.remplacerVoix(voix) }
         conversation.client = client
+        // 30.10 : les étapes de la voix notées par le relais (la démo n'a pas de relais)
+        conversation.diagnostic = voix == nil ? nil : DiagnosticVoix(acces: acces)
         abonnement?.cancel()
         releve?.cancel()
         releve = Task { [weak self] in

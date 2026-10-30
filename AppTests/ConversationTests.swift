@@ -522,21 +522,23 @@ struct ConversationTests {
         await client.arreter()
     }
 
-    @Test("Micro coupé PENDANT une phrase (25.10) : abandonnée sur-le-champ, plus rien ne part")
+    @Test("Micro coupé PENDANT une phrase (30.10) : la phrase est envoyée et comprise, puis plus rien ne part")
     func microCoupePendantUnePhrase() async throws {
         let relais = RelaisDeTest()
+        relais.repondreALaVoix = true
         let (c, client, voix) = try await Self.monter(relais)
         try await Self.parlerSansFinir(c, voix, relais)
         c.basculerMicro()
-        #expect(c.microCoupe && c.enConversation && c.phase == .ecoute && c.niveauMicro == 0)
-        // 30.10 : le noyau ne montre plus l'écoute (comme la console)
-        #expect(c.phaseAffichee == .repos)
-        // la maison annule le tour en vol (désabonnement) : rien n'est compris ni fait
-        for _ in 0..<300 {
-            if await !relais.desabonnements().isEmpty { break }
-            try await Task.sleep(for: .milliseconds(10))
+        // retour d'essai du 30.10 : « si je coupe le micro, il ne fait pas la partie analyse » — elle part, telle quelle
+        #expect(c.microCoupe && c.enConversation && c.phase == .reflexion && c.niveauMicro == 0)
+        try await Self.attendre(c) {
+            $0.messages.contains { $0.auteur == .alfred && $0.texte == RelaisDeTest.reponse && !$0.enCours }
         }
-        #expect(await relais.desabonnements().count == 1)
+        #expect(await relais.finsDeParole() == 1)
+        #expect(await relais.desabonnements().isEmpty)
+        // la réponse lue, la conversation reste ouverte, micro coupé ; le noyau ne montre plus l'écoute (comme la console)
+        try await Self.attendre(c) { $0.phase == .ecoute }
+        #expect(c.microCoupe && c.enConversation && c.phaseAffichee == .repos && c.niveauMicro == 0)
         // la pièce continue de parler fort : plus rien ne part (le micro est éteint), aucun nouveau tour
         for _ in 0..<50 { voix.entendre([Float](repeating: 0.3, count: 320)) }
         try await Task.sleep(for: .milliseconds(300))
