@@ -169,6 +169,10 @@ final class Conversation {
     private let reglages: UserDefaults
     /// Le fil de HA de la conversation en cours (nil : un fil neuf au prochain tour).
     @ObservationIgnored private(set) var conversationId: String?
+    /// La dernière réponse d'Alfred attend une suite (`continue_conversation` de HA : il a posé une question). La réponse
+    /// suivante, écrite ou dite, garde alors le fil, même hors conversation — retour d'essai du 30.10 : « rappelle-moi de
+    /// vérifier la garantie » → « À quel moment ? » → « lundi » partait d'un fil neuf, Alfred avait tout oublié.
+    @ObservationIgnored private(set) var suiteAttendue = false
     @ObservationIgnored private var ecoute: Task<Void, Never>?
     @ObservationIgnored private var minuterieSilence: Task<Void, Never>?
     @ObservationIgnored private var lecture: Task<Void, Never>?
@@ -240,7 +244,7 @@ final class Conversation {
         signalerEntreeOubliee()
         enConversation = true
         microCoupe = false
-        conversationId = nil
+        if !suiteAttendue { conversationId = nil }
         detecteur = DetecteurParole(conversation: true)
         ecouterTour(marge: 0)
     }
@@ -532,7 +536,7 @@ final class Conversation {
 
     /// Une question écrite : true si elle est partie (sinon, le texte reste à qui l'a écrit). Dans une conversation,
     /// elle en garde le fil, la conversation reste ouverte, sa réponse est lue et Alfred réécoute ensuite (la console :
-    /// `talk`) ; hors conversation, elle part d'un fil neuf. Rien ne change avant que la maison l'ait acceptée : un
+    /// `talk`) ; hors conversation, elle part d'un fil neuf, sauf si Alfred vient de poser une question (`suiteAttendue`). Rien ne change avant que la maison l'ait acceptée : un
     /// refus ne fait pas taire Alfred, ne ferme rien, et le texte reste.
     @discardableResult
     func ecrire(_ texte: String) async -> Bool {
@@ -544,7 +548,7 @@ final class Conversation {
         }
         envoiEnCours = true
         defer { envoiEnCours = false }
-        let fil = enConversation ? conversationId : nil
+        let fil = enConversation || suiteAttendue ? conversationId : nil
         minuterieSilence?.cancel()
         guard await client.ecrire(t, conversation: fil) else {
             if enConversation, phase == .ecoute { armerSilence() }
@@ -587,6 +591,7 @@ final class Conversation {
         finRecue = false
         messages = []
         conversationId = nil
+        suiteAttendue = false
         messageAlfred = nil
         attentesHermes = []
         differees = []
@@ -682,8 +687,9 @@ final class Conversation {
                 await self.terminer()
                 self.annoncer(message)
             }
-        case .termine(let conversation, _):
+        case .termine(let conversation, let continuer):
             if let conversation { conversationId = conversation }
+            suiteAttendue = continuer && conversationId != nil
             if tourVocal, !voixAnnoncee { diagnostic?.noter("sans_voix", ["phase": "\(phase)"]) }
             finRecue = true
             modifierReponse { $0.enCours = false }

@@ -18,6 +18,7 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
     private var _deconnexions = 0
     private var _avantStructure: (@Sendable () async -> Void)?
     private var _repondreALaVoix = false
+    private var _poserQuestion = false
     private var _diags: [[String: String]] = []
 
     init(etats: ValeurJSON = []) {
@@ -42,6 +43,11 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
         get { verrou.withLock { _repondreALaVoix } }
         set { verrou.withLock { _repondreALaVoix = newValue } }
     }
+    /// 30.10 : les réponses des liaisons ouvertes ENSUITE attendent une suite (`continue_conversation`).
+    var poserQuestion: Bool {
+        get { verrou.withLock { _poserQuestion } }
+        set { verrou.withLock { _poserQuestion = newValue } }
+    }
     /// Attendue avant de répondre à `/maison/structure` : un test y retient la synchronisation.
     var avantStructure: (@Sendable () async -> Void)? {
         get { verrou.withLock { _avantStructure } }
@@ -49,7 +55,8 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
     }
 
     func ouvrir() async throws -> any Liaison {
-        let l = LiaisonDeTest(etats: etats, refuser: refuserTours, repondreALaVoix: repondreALaVoix)
+        let l = LiaisonDeTest(
+            etats: etats, refuser: refuserTours, repondreALaVoix: repondreALaVoix, poserQuestion: poserQuestion)
         verrou.withLock { _liaisons.append(l) }
         await l.pousser(["type": "ready", "ha_version": "test"])
         return l
@@ -120,12 +127,14 @@ actor LiaisonDeTest: Liaison {
     private(set) var desabonnements: [Int] = []
     private(set) var finsDeParole = 0
     private let repondreALaVoix: Bool
+    private let poserQuestion: Bool
     private var tourALaVoix: ValeurJSON?
 
-    init(etats: ValeurJSON, refuser: Bool, repondreALaVoix: Bool = false) {
+    init(etats: ValeurJSON, refuser: Bool, repondreALaVoix: Bool = false, poserQuestion: Bool = false) {
         self.etats = etats
         self.refuser = refuser
         self.repondreALaVoix = repondreALaVoix
+        self.poserQuestion = poserQuestion
     }
 
     func envoyer(_ trame: Trame) async throws {
@@ -193,7 +202,7 @@ actor LiaisonDeTest: Liaison {
                 [
                     "processed_locally": false,
                     "intent_output": [
-                        "conversation_id": .texte(RelaisDeTest.fil), "continue_conversation": false,
+                        "conversation_id": .texte(RelaisDeTest.fil), "continue_conversation": .booleen(poserQuestion),
                         "response": ["speech": ["plain": ["speech": .texte(RelaisDeTest.reponse)]]],
                     ],
                 ]))

@@ -445,6 +445,31 @@ struct ConversationTests {
         await client.arreter()
     }
 
+    @Test("Écrit hors conversation : la réponse à une question d'Alfred garde son fil, une question neuve non (30.10)")
+    func ecritRepondAUneQuestion() async throws {
+        let relais = RelaisDeTest()
+        relais.poserQuestion = true
+        let (c, client, _) = try await Self.monter(relais)
+        #expect(await c.ecrire("Rappelle-moi de vérifier la garantie"))
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 2 }
+        #expect(c.suiteAttendue, "Alfred a posé une question")
+        #expect(await c.ecrire("Lundi"))
+        try await Self.attendre(c) { $0.phase == .repos && $0.messages.count == 4 }
+        await client.arreter()
+
+        // une réponse qui n'attend rien : la question écrite suivante repart d'un fil neuf
+        let relais2 = RelaisDeTest()
+        let (c2, client2, _) = try await Self.monter(relais2)
+        #expect(await c2.ecrire("Quelle heure est-il ?"))
+        try await Self.attendre(c2) { $0.phase == .repos && $0.messages.count == 2 }
+        #expect(!c2.suiteAttendue)
+        #expect(await c2.ecrire("Et demain ?"))
+        try await Self.attendre(c2) { $0.phase == .repos && $0.messages.count == 4 }
+        #expect(await relais.tours().map(\.fil) == [nil, RelaisDeTest.fil], "la réponse garde le fil")
+        #expect(await relais2.tours().map(\.fil) == [nil, nil], "sans question : un fil neuf")
+        await client2.arreter()
+    }
+
     @Test("Double appui sur « Envoyer » : une seule question part, sans faux avis")
     func doubleEnvoi() async throws {
         let relais = RelaisDeTest()
