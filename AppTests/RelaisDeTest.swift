@@ -18,6 +18,7 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
     private var _deconnexions = 0
     private var _avantStructure: (@Sendable () async -> Void)?
     private var _repondreALaVoix = false
+    private var _diags: [[String: String]] = []
 
     init(etats: ValeurJSON = []) {
         self.etats = etats
@@ -75,6 +76,17 @@ final class RelaisDeTest: AccesRelais, @unchecked Sendable {
         var tous: [TourDeTest] = []
         for l in liaisons { tous += await l.tours }
         return tous
+    }
+
+    /// Les étapes de la voix notées par l'app (`POST /diag`, 30.10).
+    var diags: [[String: String]] { verrou.withLock { _diags } }
+
+    func envoyer(_ requete: RequeteRelais) async throws -> (statut: Int, corps: Data) {
+        guard requete.chemin == "/diag", let corps = requete.corps,
+            let d = try JSONSerialization.jsonObject(with: corps) as? [String: String]
+        else { return (404, Data()) }
+        verrou.withLock { _diags.append(d) }
+        return (200, Data("ok".utf8))
     }
 
     /// Les fins de phrase reçues (marqueur d'un octet), liaison après liaison.

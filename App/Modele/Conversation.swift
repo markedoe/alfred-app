@@ -178,6 +178,8 @@ final class Conversation {
     private var tourOuvert = false
     @ObservationIgnored private var margeRestante = 0
     @ObservationIgnored private var tourVocal = false
+    /// La maison a annoncé la voix de ce tour (30.10, revue du son : un tour à la voix fini sans voix est noté).
+    @ObservationIgnored private var voixAnnoncee = false
     @ObservationIgnored private var voixEnCours = false
     /// La lecture en cours : une lecture coupée qui finit après le début de la suivante ne clôt pas le tour de celle-ci.
     @ObservationIgnored private var lectureEnCours = UUID()
@@ -285,6 +287,7 @@ final class Conversation {
         amorce = Amorce()
         tourOuvert = false
         tourVocal = true
+        voixAnnoncee = false
         margeRestante = marge
         armerSilence()
     }
@@ -339,6 +342,9 @@ final class Conversation {
         if margeRestante > 0 {
             detecteur.mesurer(echantillons)
             margeRestante -= echantillons.count
+            // 30.10 (revue du son) : la marge garde aussi l'amorce — une réplique dite aussitôt après Alfred gardait sa
+            // fin de phrase, mais perdait son premier mot (l'attaque n'est cherchée qu'après la marge)
+            amorce.ajouter(PCM.enOctets(echantillons))
             return
         }
         let decisions = detecteur.analyser(echantillons)
@@ -550,6 +556,7 @@ final class Conversation {
         messages.append(Message(id: UUID(), auteur: .moi, texte: t, date: .now))
         conversationId = fil
         tourVocal = enConversation
+        voixAnnoncee = false
         finRecue = false
         niveauMicro = 0
         phase = .reflexion
@@ -632,6 +639,7 @@ final class Conversation {
             }
         case .voix(let chemin):
             let lue = tourVocal || lireReponsesEcrites
+            voixAnnoncee = true
             diagnostic?.noter(
                 "annoncee",
                 ["lue": lue ? "oui" : "non", "phase": "\(phase)", "micro_coupe": microCoupe ? "oui" : "non"])
@@ -676,6 +684,7 @@ final class Conversation {
             }
         case .termine(let conversation, _):
             if let conversation { conversationId = conversation }
+            if tourVocal, !voixAnnoncee { diagnostic?.noter("sans_voix", ["phase": "\(phase)"]) }
             finRecue = true
             modifierReponse { $0.enCours = false }
             if !voixEnCours { tourFini() }
@@ -687,6 +696,7 @@ final class Conversation {
     /// Une question confiée à Hermes : une attente de plus, après celles des questions précédentes.
     @discardableResult
     func attendreHermes(appel: String? = nil) -> AttenteHermes {
+        diagnostic?.noter("hermes_attente", ["lue": tourVocal || lireReponsesEcrites ? "oui" : "non"])
         numeroHermes += 1
         let maintenant = Date.now
         let fin = maintenant.addingTimeInterval(Self.attenteHermesMax)
@@ -725,6 +735,8 @@ final class Conversation {
         guard phase == .repos || (phase == .ecoute && !tourOuvert) else { return }
         differees.removeFirst()
         messages.append(Message(id: UUID(), auteur: .alfred, texte: d.texte, date: .now))
+        diagnostic?.noter(
+            "hermes_livree", ["avec_voix": d.aVoix && d.chemin != nil ? "oui" : "non", "phase": "\(phase)"])
         guard d.aVoix, let chemin = d.chemin else {
             annoncer(d.texte)
             return

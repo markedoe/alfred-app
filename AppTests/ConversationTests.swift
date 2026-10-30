@@ -47,6 +47,7 @@ struct ConversationTests {
         r.reconnexionMaximale = .milliseconds(100)
         let client = ClientRelais(acces: relais, reglages: r)
         c.client = client
+        c.diagnostic = DiagnosticVoix(acces: relais)
         let ecoute = Task { @MainActor in
             var etaitPret = false
             for await n in client.nouvelles {
@@ -536,6 +537,12 @@ struct ConversationTests {
         }
         #expect(await relais.finsDeParole() == 1)
         #expect(await relais.desabonnements().isEmpty)
+        // la voix annoncée par la maison est notée au relais (30.10, revue du son), sans texte
+        for _ in 0..<300 {
+            if relais.diags.contains(where: { $0["etape"] == "annoncee" }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(relais.diags.contains { $0["etape"] == "annoncee" && $0["lue"] == "oui" && $0["quoi"] == "voix_app" })
         // la réponse lue, la conversation reste ouverte, micro coupé ; le noyau ne montre plus l'écoute (comme la console)
         try await Self.attendre(c) { $0.phase == .ecoute }
         #expect(c.microCoupe && c.enConversation && c.phaseAffichee == .repos && c.niveauMicro == 0)

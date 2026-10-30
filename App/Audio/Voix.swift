@@ -262,8 +262,15 @@ final class VoixSysteme: MoteurVoix {
     }
 
     func lire(_ chemin: String) async {
+        // 30.10 (revue du son) : la lecture précédente est ATTENDUE une fois annulée — sa fermeture différée, sur le même
+        // lecteur, fermait la nouvelle (une réponse d'Hermès juste après une réponse : silence)
+        let precedente = lecture
         interrompre()
-        let lecteur = (micOuvert ? lecteurConversation : nil) ?? lecteurSeul
+        await precedente?.value
+        // le moteur du micro arrêté (matériel changé, entre la notification et la fermeture de la conversation) : la voix
+        // passe par le lecteur à part au lieu de se taire sans erreur
+        let surLeMicro = micOuvert && capture.moteur.isRunning
+        let lecteur = (surLeMicro ? lecteurConversation : nil) ?? lecteurSeul
         if !micOuvert {
             // une réponse lue par synthèse : le mode « voicePrompt », avec les options que la doc d'Apple lui associe
             // (la musique baisse, un podcast s'interrompt)
