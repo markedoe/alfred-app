@@ -49,7 +49,7 @@ struct Roue: View {
                 }
             }
             Reacteur(
-                phase: conversation.phase, enConversation: conversation.enConversation,
+                phase: conversation.phaseAffichee, enConversation: conversation.enConversation,
                 niveau: { conversation.phase == .reponse ? conversation.niveauVoix : conversation.niveauMicro },
                 rayon: rayon, action: alfred.action, connecte: alfred.estPret, compact: compact, debut: debut,
                 geometrie: g, secteurAction: secteurs.firstIndex { $0.id == alfred.action?.secteur },

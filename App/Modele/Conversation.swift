@@ -89,6 +89,11 @@ final class Conversation {
     private(set) var enConversation = false
     /// 24.10 (« un bouton qui coupe le micro ») : dans la conversation, Alfred n’entend plus rien.
     private(set) var microCoupe = false
+
+    /// La phase MONTRÉE (noyau, panneaux, statut) : micro coupé, Alfred n'écoute plus et ne doit plus en avoir l'air —
+    /// comme la console, qui quitte l'écoute au micro coupé (`toggleMute` : `setMode("idle")`). Retour d'essai du
+    /// 30.10 : « le micro était coupé, mais il n'arrêtait pas d'écouter » (le noyau restait sarcelle et animé).
+    var phaseAffichee: Phase { microCoupe && phase == .ecoute ? .repos : phase }
     /// Le micro d'iOS allumé (il s'éteint quand le micro est coupé, puis se rallume).
     @ObservationIgnored private var micAllume = false
     /// L'écran reste allumé tant qu'une conversation est en cours : micro ouvert, réflexion, réponse ou envoi (22.10,

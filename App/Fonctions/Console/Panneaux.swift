@@ -10,7 +10,7 @@ struct PanneauAlfred: View {
     @Environment(\.dynamicTypeSize) private var tailleTexte
 
     var body: some View {
-        PanneauVerre(phase: conversation.phase) {
+        PanneauVerre(phase: conversation.phaseAffichee) {
             if tailleTexte.isAccessibilitySize {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -261,7 +261,7 @@ struct PanneauEnvironnement: View {
     private var tailleTemperature: CGFloat { min(tailleMesuree, 72) }
 
     var body: some View {
-        PanneauVerre(phase: conversation.phase) {
+        PanneauVerre(phase: conversation.phaseAffichee) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Extérieur").titreSection()

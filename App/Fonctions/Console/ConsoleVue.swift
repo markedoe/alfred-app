@@ -337,7 +337,7 @@ struct BasConsole: View {
             }
             NiveauMicro()
             Text(statut)
-                .font(.caption.weight(conversation.phase == .ecoute ? .semibold : .regular))
+                .font(.caption.weight(conversation.phaseAffichee == .ecoute ? .semibold : .regular))
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(couleurStatut)
                 .lineLimit(2)
@@ -387,7 +387,7 @@ struct BasConsole: View {
     private var couleurStatut: Color {
         if case .fatal = alfred.liaison { return Color(.alerte) }
         if conversation.enConversation, conversation.microCoupe { return Color(.sodium) }
-        return conversation.phase == .ecoute ? Color(.sarcelle) : Color(.texteSecondaire)
+        return conversation.phaseAffichee == .ecoute ? Color(.sarcelle) : Color(.texteSecondaire)
     }
 }
 
@@ -400,7 +400,8 @@ private struct NiveauMicro: View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !conversation.enConversation || immobile)) { _ in
             GeometryReader { g in
                 let n =
-                    conversation.enConversation && conversation.phase == .ecoute ? CGFloat(conversation.niveauMicro) : 0
+                    conversation.enConversation && conversation.phaseAffichee == .ecoute
+                    ? CGFloat(conversation.niveauMicro) : 0
                 ZStack(alignment: .leading) {
                     Capsule().fill(Console.jaugeVide)
                     Capsule().fill(Color(.sarcelle)).frame(width: g.size.width * min(1, n * 2.2))

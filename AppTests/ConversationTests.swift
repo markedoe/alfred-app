@@ -529,6 +529,8 @@ struct ConversationTests {
         try await Self.parlerSansFinir(c, voix, relais)
         c.basculerMicro()
         #expect(c.microCoupe && c.enConversation && c.phase == .ecoute && c.niveauMicro == 0)
+        // 30.10 : le noyau ne montre plus l'écoute (comme la console)
+        #expect(c.phaseAffichee == .repos)
         // la maison annule le tour en vol (désabonnement) : rien n'est compris ni fait
         for _ in 0..<300 {
             if await !relais.desabonnements().isEmpty { break }
@@ -568,7 +570,7 @@ struct ConversationTests {
         #expect(c.avis == nil && c.enConversation && c.phase == .ecoute && c.niveauMicro == 0)
         // rouvert : Alfred réécoute aussitôt, une phrase ouvre un tour
         c.basculerMicro()
-        #expect(!c.microCoupe && c.phase == .ecoute)
+        #expect(!c.microCoupe && c.phase == .ecoute && c.phaseAffichee == .ecoute)
         voix.entendre([Float](repeating: 0.001, count: 1600))
         for _ in 0..<20 { voix.entendre([Float](repeating: 0.3, count: 320)) }
         try await Self.attendre(c) { $0.avis?.texte == "Je n’ai rien saisi." }
