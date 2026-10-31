@@ -80,7 +80,8 @@ Aucune bibliothèque tierce : seulement les frameworks d’Apple.
 
 ## Fabriquer
 
-Avec **Xcode 27.2** (macOS Tahoe 26.6 ou plus récent ; la CI aussi, depuis le 31.10.2026).
+Avec **Xcode 26.6** (la CI sur les Mac de GitHub) ; **Xcode 27.2** aussi (fabrication et tests vérifiés le 31.10.2026 :
+c'est celui du Mac de la CI hébergé chez soi, à venir).
 
 ```sh
 scripts/generer.sh                 # configuration (facultative) + projet Xcode
