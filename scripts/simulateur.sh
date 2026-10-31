@@ -15,10 +15,11 @@ genre = os.environ["GENRE"]
 chemins = {t["identifier"]: t["bundlePath"] for t in json.loads(os.environ["MODELES"])["devicetypes"]}
 
 def version(rt):
-    """Version du runtime ; à version égale, le runtime général d’abord : Xcode 27.2 installe aussi un runtime propre
-    à un modèle (« iOS-27-2-iPhone19-4 », l’iPhone Duo seul), qui n’est pas celui des autres iPhone (31.10)."""
+    """Ordre des runtimes : le runtime GÉNÉRAL d’abord, puis le plus récent. Xcode 27.2 installe aussi un runtime propre
+    à un modèle (« iOS-27-2-iPhone19-4 », l’iPhone Duo seul), parfois plus récent que le général (image « xcode-27 » de
+    GitHub, 31.10 : iOS 27.1 général, 27.2 pour le Duo) : il n’est pris qu’à défaut."""
     m = re.search(r"iOS-(\d+)-(\d+)(-.+)?$", rt)
-    return (int(m.group(1)), int(m.group(2)), m.group(3) is None) if m else (0, 0, False)
+    return (m.group(3) is None, int(m.group(1)), int(m.group(2))) if m else (False, 0, 0)
 
 def ecran_integre(v):
     """Le premier écran « integrated » d’une liste « displays », où qu’elle soit dans capabilities.plist."""
