@@ -214,6 +214,10 @@ jobs:
         run: |
           udid=$(scripts/simulateur.sh "$GENRE")
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          # 31.10 (iOS 27) : démarré et PRÊT avant les tests — sur un simulateur qui démarrait encore, le premier
+          # lancement de l'app dépassait le délai de XCTest (« Timed out while launching application », deux fois de
+          # suite sur testAccessibilite, le premier test d'interface)
+          xcrun simctl bootstatus "$udid" -b
       - name: Fabrication et tests
         env:
           UDID: ${{ steps.simulateur.outputs.udid }}
