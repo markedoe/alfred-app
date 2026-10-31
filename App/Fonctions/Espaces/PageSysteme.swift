@@ -470,6 +470,8 @@ struct FicheConnecteur: View {
     let fermer: () -> Void
     @Environment(\.openURL) private var ouvrir
     @AccessibilityFocusState private var focusNom: Bool
+    /// La hauteur du corps, mesurée : sa zone de défilement ne la dépasse pas (voir `body`).
+    @State private var hauteurCorps: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -484,12 +486,19 @@ struct FicheConnecteur: View {
                 tete
                     .padding([.horizontal, .top], 24)
                     .padding(.bottom, 4)
-                ViewThatFits(in: .vertical) {
-                    corps
-                    ScrollView { corps }
-                        .scrollBounceBehavior(.basedOnSize)
-                        .accessibilityIdentifier("ficheCorps")
+                // 31.10 (iOS 27) : « ViewThatFits » gardait le corps fixe alors qu'il dépassait de peu — le bas de la
+                // fiche coupé (marge, et le lien « Historique ») ; l'audit d'accessibilité le signalait. Le corps défile
+                // donc toujours, à sa hauteur mesurée au plus (pas de vide sous une fiche courte), moins si l'écran manque.
+                ScrollView {
+                    corps.onGeometryChange(for: CGFloat.self) {
+                        $0.size.height
+                    } action: {
+                        hauteurCorps = $0
+                    }
                 }
+                .frame(maxHeight: hauteurCorps > 0 ? hauteurCorps : nil)
+                .scrollBounceBehavior(.basedOnSize)
+                .accessibilityIdentifier("ficheCorps")
             }
             .background {
                 RoundedRectangle(cornerRadius: 14).fill(Color(red: 16 / 255, green: 30 / 255, blue: 44 / 255))
