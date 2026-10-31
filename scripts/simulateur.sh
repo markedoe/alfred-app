@@ -55,10 +55,18 @@ def largeur(x):
 def defaut(appareils):
     return sorted(appareils, key=lambda x: (" Pro" not in x["name"], "Max" in x["name"], x["name"]))[0]
 
-runtimes = sorted((rt for rt in d if "iOS" in rt and d[rt]), key=version, reverse=True)
+prefixe = "iPad" if genre == "ipad" else "iPhone"
+
+def du_genre(rt):
+    return [x for x in d[rt] if x.get("isAvailable") and x["name"].startswith(prefixe)]
+
+# 31.10 : le runtime qui porte le PLUS d’appareils du genre d’abord, puis le plus récent — un runtime propre à un modèle
+# (l’iPhone Duo de Xcode 27.2) n’en porte qu’un, quel que soit son nom (sur l’image « xcode-27 » de GitHub, son nom ne
+# le distingue pas)
+runtimes = sorted((rt for rt in d if "iOS" in rt and d[rt]), key=lambda rt: (len(du_genre(rt)), version(rt)), reverse=True)
+print("runtimes : " + " ; ".join("%s (%d)" % (rt.rsplit(".", 1)[-1], len(du_genre(rt))) for rt in runtimes), file=sys.stderr)
 for rt in runtimes:
-    prefixe = "iPad" if genre == "ipad" else "iPhone"
-    appareils = [x for x in d[rt] if x.get("isAvailable") and x["name"].startswith(prefixe)]
+    appareils = du_genre(rt)
     if not appareils:
         continue
     if genre == "ipad":
