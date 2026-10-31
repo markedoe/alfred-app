@@ -104,10 +104,10 @@ jobs:
     name: Icône (compilée et rendue par les outils d'Apple)
     needs: changements
     if: needs.changements.outputs.app == 'true'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 10
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,7 +129,7 @@ jobs:
           fi
           "$ictool" --version
           mkdir -p "$RUNNER_TEMP/icone"
-          # syntaxe de « ictool --help » (Xcode 26.6) ; le masque d'iOS est déjà appliqué
+          # syntaxe de « ictool --help » (Xcode 26.6, inchangée en 27.2) ; le masque d'iOS est déjà appliqué
           for apparence in Default Dark ClearLight ClearDark TintedLight TintedDark; do
             "$ictool" App/Ressources/AppIcon.icon --export-image --output-file "$RUNNER_TEMP/icone/$apparence.png" \
               --platform iOS --rendition "$apparence" --width 1024 --height 1024 --scale 1
@@ -163,7 +163,7 @@ jobs:
     name: App iOS — ${{ matrix.titre }}
     needs: [changements, style]
     if: needs.changements.outputs.app == 'true'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -189,7 +189,7 @@ jobs:
             largeur: "390"
             resultats: ResultatsEtroit
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

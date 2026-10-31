@@ -80,6 +80,8 @@ Aucune bibliothèque tierce : seulement les frameworks d’Apple.
 
 ## Fabriquer
 
+Avec **Xcode 27.2** (macOS Tahoe 26.6 ou plus récent ; la CI aussi, depuis le 31.10.2026).
+
 ```sh
 scripts/generer.sh                 # configuration (facultative) + projet Xcode
 open Alfred.xcodeproj

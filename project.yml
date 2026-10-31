@@ -9,7 +9,7 @@ options:
   developmentLanguage: fr
   createIntermediateGroups: true
   groupSortPosition: top
-  xcodeVersion: "26.6"
+  xcodeVersion: "27.2"
   generateEmptyDirectories: false
 
 configFiles:
