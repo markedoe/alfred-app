@@ -35,13 +35,16 @@ jobs:
 
   swift:
     name: Swift
-    runs-on: xcode-27
+    # 31.10 : CodeQL échoue encore sous Xcode 27.2 (« posix_spawn error: Bad CPU type in executable » au chargement du
+    # manifeste de SwiftPM, un programme Intel lancé sans Rosetta sur l'image « xcode-27 ») ; l'analyse du code reste
+    # sous Xcode 26.6 (macos-26), qui fabrique le même code. À remonter en 27 dès que CodeQL le permet.
+    runs-on: macos-26
     timeout-minutes: 60
     permissions:
       contents: read
       security-events: write
     env:
-      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       XCODEGEN_VERSION: 2.46.0
       XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
     steps:

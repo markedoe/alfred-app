@@ -15,17 +15,41 @@ genre = os.environ["GENRE"]
 chemins = {t["identifier"]: t["bundlePath"] for t in json.loads(os.environ["MODELES"])["devicetypes"]}
 
 def version(rt):
-    m = re.search(r"iOS-(\d+)-(\d+)", rt)
-    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    """Version du runtime ; à version égale, le runtime général d’abord : Xcode 27.2 installe aussi un runtime propre
+    à un modèle (« iOS-27-2-iPhone19-4 », l’iPhone Duo seul), qui n’est pas celui des autres iPhone (31.10)."""
+    m = re.search(r"iOS-(\d+)-(\d+)(-.+)?$", rt)
+    return (int(m.group(1)), int(m.group(2)), m.group(3) is None) if m else (0, 0, False)
+
+def ecran_integre(v):
+    """Le premier écran « integrated » d’une liste « displays », où qu’elle soit dans capabilities.plist."""
+    if isinstance(v, dict):
+        if v.get("displayType") == "integrated" and "width" in v and "scale" in v:
+            return v
+        v = list(v.values())
+    if isinstance(v, list):
+        for e in v:
+            r = ecran_integre(e)
+            if r:
+                return r
+    return None
 
 def largeur(x):
-    """La largeur de l’écran en points (pixels / échelle), lue dans le profil du modèle."""
-    chemin = os.path.join(chemins[x["deviceTypeIdentifier"]], "Contents", "Resources", "profile.plist")
-    with open(chemin, "rb") as f:
+    """La largeur de l’écran en points (pixels / échelle), lue dans le profil du modèle — profile.plist jusqu’à Xcode
+    26 ; depuis Xcode 27.2, l’écran intégré de capabilities.plist (31.10). Sans aucune des deux : écarté."""
+    ressources = os.path.join(chemins[x["deviceTypeIdentifier"]], "Contents", "Resources")
+    with open(os.path.join(ressources, "profile.plist"), "rb") as f:
         p = plistlib.load(f)
-    if "mainScreenWidth" not in p or "mainScreenScale" not in p:
-        sys.exit("%s : ni mainScreenWidth ni mainScreenScale (%s)" % (chemin, sorted(p)))
-    return p["mainScreenWidth"] / p["mainScreenScale"]
+    if "mainScreenWidth" in p and "mainScreenScale" in p:
+        return p["mainScreenWidth"] / p["mainScreenScale"]
+    try:
+        with open(os.path.join(ressources, "capabilities.plist"), "rb") as f:
+            e = ecran_integre(plistlib.load(f))
+    except OSError:
+        e = None
+    if e:
+        return e["width"] / e["scale"]
+    print("%s : sans taille d’écran, écarté" % x["name"], file=sys.stderr)
+    return None
 
 def defaut(appareils):
     return sorted(appareils, key=lambda x: (" Pro" not in x["name"], "Max" in x["name"], x["name"]))[0]
@@ -39,7 +63,10 @@ for rt in runtimes:
     if genre == "ipad":
         choisi = sorted(appareils, key=lambda x: (" Pro" not in x["name"], "13" not in x["name"], x["name"]))[0]
     elif genre == "etroit":
-        choisi, reference = min(appareils, key=largeur), defaut(appareils)
+        mesurables = [x for x in appareils if largeur(x) is not None]
+        if not mesurables:
+            continue
+        choisi, reference = min(mesurables, key=largeur), defaut(mesurables)
         print("%s : %g pt (par défaut, %s : %g pt)" % (choisi["name"], largeur(choisi), reference["name"],
               largeur(reference)), file=sys.stderr)
         if largeur(choisi) >= largeur(reference):
