@@ -1,0 +1,31 @@
+# La doc suit le code (31.10.2026) : chaque commit qui change du code change aussi de la doc, ou son message dit
+# « Doc : inchangée — <raison> » (scripts/outils/doc_suit.py). Les envois vont directement sur main : ce contrôle signale après coup (rouge,
+# e-mail) ; le crochet commit-msg, lui, refuse avant le commit. Aucun secret.
+name: Doc
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  doc:
+    name: La doc suit le code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Commits de l'envoi
+        env:
+          AVANT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          APRES: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$AVANT" ] || ! git cat-file -e "$AVANT^{commit}" 2>/dev/null; then plage="$APRES~1..$APRES"; else plage="$AVANT..$APRES"; fi
+          python3 scripts/outils/doc_suit.py --reglages scripts/outils/doc_suit.json --plage "$plage"

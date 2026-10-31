@@ -1,0 +1,7 @@
+{
+  "_note": "scripts/outils/doc_suit.py (31.10.2026) : ce qui est du code de l'app et ce qui est de la doc. « hors » : ni l'un ni l'autre (tests, fiche de l'App Store, réglages de la CI).",
+  "doc": ["**.md"],
+  "code": ["App/**", "Paquets/**", "project.yml", "Configuration/**", "scripts/**"],
+  "hors": ["AppTests/**", "AppUITests/**", "Paquets/**/Tests/**", "AppStore/**", ".github/**", ".gitignore",
+           "**.xcassets/**", "**.icon/**", "scripts/outils/doc_suit.json"]
+}

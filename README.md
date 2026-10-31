@@ -18,8 +18,9 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
   - Un toucher sur le noyau ouvre une conversation continue : chaque phrase est un tour, et Alfred réécoute après
     avoir répondu.
   - La conversation se ferme d’un toucher, après 90 s de silence, ou quand l’app passe en arrière-plan.
-  - Pendant la conversation, le bouton du micro (ou « m » au clavier) le coupe : Alfred n’entend plus rien, sa
-    réponse en cours finit, et la conversation reste ouverte (10 min au plus) ; un second appui et il réécoute aussitôt.
+  - Pendant la conversation, le bouton du micro (ou « m » au clavier) le coupe : une phrase commencée est envoyée et
+    Alfred y répond, puis il n’entend plus rien ; sa réponse en cours finit, et la conversation reste ouverte (10 min au
+    plus) ; un second appui et il réécoute aussitôt.
   - On l’entend répondre pendant que sa voix est synthétisée. Sous chaque réponse, comme la console : sa durée,
     « llm » ou « intent local », le nombre d’outils, et les « Détails techniques » repliés (chaque outil, ses
     arguments, fait ou échoué ; jamais le contenu d’un résultat).
@@ -29,6 +30,8 @@ tiers, ni suivi. La voix va de l’appareil au relais, puis à Home Assistant, e
     réponse qui n’est pas lue est annoncée.
   - Pendant une conversation, l’écrit en garde le fil et la conversation : la réponse est lue, puis Alfred réécoute
     (un nom que le micro comprend mal s’écrit sans tout recommencer).
+  - Hors conversation, une question écrite part d’un fil neuf, sauf quand Alfred vient d’en poser une (« À quel
+    moment ? ») : la réponse, écrite ou dite, reste dans le même fil.
 - **La maison (la roue)**
   - Un secteur par pièce de la console (nom, température), ambre quand la lumière est allumée. Toucher un secteur
     ouvre la pièce : ses mesures et un seul bouton, Allumer ou Éteindre. Le réacteur suit la commande (crochets,
@@ -102,6 +105,7 @@ swift test --package-path Paquets/AlfredKit
 | Workflow | Quand | Quoi |
 |---|---|---|
 | `Intégration` | Chaque envoi, chaque demande de fusion | Sous Linux d’abord : gitleaks ; tests des outils Python (App Store Connect et GitHub simulés, masques des journaux, icône à jour) ; `AlfredKit` ; swift-format et tailles de texte figées (avant de réserver un Mac) ; « l’app a-t-elle changé ? ». Puis, si l’app a changé, sur trois Mac en parallèle : fabrication, `AlfredKit` sous macOS, tests unitaires et d’interface, audit d’accessibilité d’Apple (captures jointes) ; iPad en disposition large ; iPhone le plus étroit (en-tête) ; et l’icône compilée et rendue par les outils d’Apple dans ses six apparences (artefact « icone ») |
+| `Doc` | Chaque envoi, chaque demande de fusion | Chaque commit qui change le code de l’app change aussi une doc (`*.md` : ce README, `docs/`), ou son message dit « Doc : inchangée — <raison> » (`scripts/outils/doc_suit.py`, réglages `scripts/outils/doc_suit.json`) ; le même contrôle refuse le commit en local (crochet `commit-msg`) |
 | `CodeQL` | Chaque envoi, et chaque semaine | Analyse de sécurité du code Swift, des workflows et des outils Python |
 | `TestFlight` | À la main, sur une étiquette `v*`, ou tout seul quand `Intégration` réussit sur un envoi sur `main` et que ce qui part dans l’app a changé depuis la dernière fabrication | Archive signée (signature automatique : certificat de développement unique de la CI, distribution gérée par Apple), envoi aux testeurs internes, puis aux testeurs externes après l’examen d’Apple (« externe », coché par défaut) ; à la main, « envoyer » décoché : archive et export signés seulement |
 | `Testeurs externes` | À la main, ou appelé par `TestFlight` | Groupe externe sans lien public, informations de test et contact de l’examen d’Apple, envoi d’une fabrication à l’examen, invitations ; aucune donnée personnelle dans le journal (secrets masqués champ par champ) |
